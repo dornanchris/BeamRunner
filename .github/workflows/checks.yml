@@ -1,0 +1,126 @@
+# Headless checks that need no Unity Editor and no Unity license (see docs/CI.md):
+#   * tools/unity-compile-check: compiles all project C# with Roslyn against Unity reference assemblies (Core,
+#     EditMode tests, Assembly-CSharp for Android/iOS/editor, Editor scripts) and runs the NUnit tests with dotnet test
+#   * tools/gen-metas.py --check: every asset/folder under Assets/BeamRunner has a .meta, no orphans/duplicates
+#   * tools/check-strings.py: string tables (keys, placeholders, CLDR plurals), no user-facing literals outside the
+#     tables, and every character of every language renders with its bundled font (see docs/LOCALIZATION.md)
+name: Checks
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  compile-check:
+    name: Compile check + unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Built toolchain (engine refs, package assemblies, API index, NuGet packages); restored from the Actions cache.
+      UCC_CACHE: ~/.cache/unity-compile-check
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
+
+      # Keyed on the toolchain sources (pins, recipe, UccTool, stubs, shims): an unchanged toolchain restores the
+      # exact cache, a changed one restores the newest older cache and setup.sh rebuilds only what changed.
+      # The cache dir's children are listed with /* because actions/cache only honours the ! exclusions (clones,
+      # patched package sources, last compile plans) for paths the include pattern itself enumerates.
+      - name: Restore toolchain cache
+        id: ucc-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/unity-compile-check/*
+            !~/.cache/unity-compile-check/src
+            !~/.cache/unity-compile-check/src-patched
+            !~/.cache/unity-compile-check/work
+          key: ucc-${{ runner.os }}-${{ hashFiles('tools/unity-compile-check/**') }}
+          restore-keys: ucc-${{ runner.os }}-
+
+      # Cold: shallow/blob-less/sparse clones of the pinned sources (~40 MB) + builds, ~2 min.
+      # Warm (cache restored): no clones at all, ~10 s.
+      - name: Set up toolchain
+        id: setup
+        env:
+          UCC_SRC_ROOT: ${{ runner.temp }}/ucc-src
+        run: |
+          set -o pipefail
+          bash tools/unity-compile-check/setup.sh 2>&1 | tee "$RUNNER_TEMP/ucc-setup.log"
+
+      # Saved right after setup (not at job end), so a red check still leaves a warm cache for the next run.
+      - name: Save toolchain cache
+        if: always() && steps.setup.outcome == 'success' && steps.ucc-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cache/unity-compile-check/*
+            !~/.cache/unity-compile-check/src
+            !~/.cache/unity-compile-check/src-patched
+            !~/.cache/unity-compile-check/work
+          key: ${{ steps.ucc-cache.outputs.cache-primary-key }}
+
+      - name: Compile check + unit tests
+        run: |
+          set -o pipefail
+          status=0
+          bash tools/unity-compile-check/check.sh 2>&1 | tee "$RUNNER_TEMP/ucc-check.log" || status=$?
+          {
+            echo '### unity-compile-check'
+            echo '```'
+            grep -E '^  \[[0-9]\] |tests: total|^RESULT' "$RUNNER_TEMP/ucc-check.log" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Upload check logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: unity-compile-check-logs
+          path: |
+            ${{ runner.temp }}/ucc-setup.log
+            ${{ runner.temp }}/ucc-check.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  metas:
+    name: Unity .meta files
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check .meta files
+        run: python3 tools/gen-metas.py --check
+
+  strings:
+    name: Localization strings + font glyphs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      # fontTools reads the bundled fonts' character maps for the glyph-coverage check.
+      - name: Install fontTools
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet --disable-pip-version-check fonttools==4.66.0
+      - name: Check strings
+        run: '"$RUNNER_TEMP/venv/bin/python" tools/check-strings.py'

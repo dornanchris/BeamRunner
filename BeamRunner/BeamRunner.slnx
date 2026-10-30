@@ -1,0 +1,9 @@
+﻿<Solution>
+  <Project Path="BeamRunner.Core.csproj" />
+  <Project Path="Assembly-CSharp.csproj" />
+  <Project Path="Assembly-CSharp-Editor.csproj" />
+  <Project Path="BeamRunner.PlayMode.Tests.csproj" />
+  <Project Path="Google.Play.Games.Editor.csproj" />
+  <Project Path="Google.Play.Games.csproj" />
+  <Project Path="BeamRunner.Core.Tests.csproj" />
+</Solution>

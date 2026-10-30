@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder shipped with BeamRunner so Android builds work before Google Play Games is configured.
+     Window > Google Play Games > Setup > Android Setup overwrites this file with the plugin's generated manifest
+     (the Play Games app id and the plugin's bridge activity); commit that version. Until then the game never starts
+     the Play Games SDK (OnlineServiceFactory checks PlayGamesSettings for an app id). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.google.example.games.mainlibproj"
+    android:versionCode="1"
+    android:versionName="1.0" >
+
+    <application>
+    </application>
+</manifest>

@@ -1,0 +1,45 @@
+{
+  "_readme": "BeamRunner balance (combat, progression, adaptive difficulty). Every field of Scripts/Core/Balance/BalanceConfig.cs can be set here; fields left out keep their code defaults, and broken values are repaired at load (BalanceConfig.Sanitized). Formulas: BlockHP(L) = BlockHpBase x BlockHpGrowth^(L-1); UpgradeCost(n) = CostBase[stat] x CostGrowth^n. Arrays indexed by upgrade: Damage, FireRate, Crit, Spread, Pierce. Rating tables: index 0..4 = rating -2 (Relaxed) .. +2 (Expert), interpolated in between. See docs/ARCHITECTURE.md (Balance). Keys starting with _ are ignored.",
+
+  "BlockHpBase": 5.0,
+  "BlockHpGrowth": 1.10,
+  "HeavyHpScale": 2.4,
+  "BlockGemChance": 0.25,
+  "GemValueBase": 1.0,
+  "GemValuePerLevel": 0.12,
+
+  "DamageBase": 1.0,
+  "DamageGrowthEarly": 0.13,
+  "DamageEarlyLevels": 10,
+  "DamageGrowthLate": 0.07,
+  "FireRateBase": 6.0,
+  "FireRatePerLevel": 0.06,
+  "CritBase": 0.03,
+  "CritPerLevel": 0.025,
+  "CritMultiplier": 2.0,
+  "SpreadDamageBase": 0.35,
+  "SpreadDamagePerLevel": 0.05,
+
+  "MaxLevels": [40, 25, 10, 8, 1],
+  "CostBase": [40, 40, 70, 300, 900],
+  "CostGrowth": 1.20,
+  "UnlockLevels": [0, 0, 2, 4, 7],
+
+  "OverdriveSeconds": 4.0,
+  "RapidFireSeconds": 6.0,
+  "TripleShotSeconds": 6.0,
+  "MagnetSeconds": 8.0,
+  "PowerUpIntervalMin": 14.0,
+  "PowerUpIntervalMax": 22.0,
+
+  "RatingSpeed": [0.80, 0.90, 1.00, 1.10, 1.20],
+  "RatingHp": [0.70, 0.85, 1.00, 1.15, 1.30],
+  "RatingDensity": [0.70, 0.85, 1.00, 1.15, 1.30],
+  "RatingArmored": [0.00, 0.50, 1.00, 1.35, 1.70],
+  "RatingPowerUps": [1.30, 1.15, 1.00, 0.90, 0.80],
+  "RatingGems": [0.80, 0.90, 1.00, 1.15, 1.30],
+  "RatingStep": 0.25,
+  "RatingWindow": 5,
+  "EarlyDeathSeconds": 15.0,
+  "RagePenalty": 0.25
+}

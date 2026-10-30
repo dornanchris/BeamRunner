@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Google Play In-App Review for BeamRunner (called through JNI by Services/Platform/StoreReview.cs).
+  Read by the External Dependency Manager / Mobile Dependency Resolver (EDM4U), which the LevelPlay SDK already
+  requires: it picks up every *Dependencies.xml inside an "Editor" folder. Run
+  Assets > External Dependency Manager > Android Resolver > Resolve after changing this file.
+  com.google.android.play:review 2.0.2 (Oct 2024) is the newest release; it pulls play-services-tasks/-basement
+  (Gradle picks the newest versions shared with the ad SDKs). Google Maven (google()) is in Unity's Gradle templates.
+-->
+<dependencies>
+  <androidPackages>
+    <androidPackage spec="com.google.android.play:review:2.0.2">
+      <repositories>
+        <repository>https://maven.google.com</repository>
+      </repositories>
+    </androidPackage>
+  </androidPackages>
+</dependencies>

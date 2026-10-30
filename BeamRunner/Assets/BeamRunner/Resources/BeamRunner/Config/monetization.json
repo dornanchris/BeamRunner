@@ -1,0 +1,58 @@
+{
+  "_readme": "BeamRunner monetization config. See Scripts/Runtime/Services/README.md. Before release: set the LevelPlay app keys and the rewarded/interstitial ad unit ids for Android and iOS (LevelPlay dashboard; empty = no ads in release builds, simulated ads in the Editor/development builds), replace the example.com privacy/terms/support placeholders, set iosAppId, optionally set crashReportingDsn (Sentry client key; empty = no crash reports; crashReportingInEditor = also report from the Editor), and create the products below with identical ids in Google Play Console and App Store Connect. testMode only affects development builds (opens the LevelPlay Test Suite). Android/iOS release builds fail while the platform's LevelPlay app key / ad units or the privacy policy URL are missing; allowIncompleteReleaseBuild: true builds anyway (test-track builds only, set it back to false for the store). Keys starting with '_' are ignored.",
+
+  "levelPlayAppKeyAndroid": "",
+  "levelPlayAppKeyIos": "",
+  "rewardedAdUnitAndroid": "",
+  "rewardedAdUnitIos": "",
+  "interstitialAdUnitAndroid": "",
+  "interstitialAdUnitIos": "",
+  "testMode": true,
+  "simulateAdsInEditor": true,
+  "allowIncompleteReleaseBuild": false,
+
+  "products": [
+    {
+      "id": "beamrunner.removeads",
+      "type": "NonConsumable",
+      "gems": 0,
+      "title": "Remove Ads",
+      "description": "No more interstitial ads between runs. Rewarded ads stay optional.",
+      "fallbackPrice": "$2.99"
+    },
+    {
+      "id": "beamrunner.gems.small",
+      "type": "Consumable",
+      "gems": 1000,
+      "title": "Gem Cache",
+      "description": "1,000 gems.",
+      "fallbackPrice": "$0.99"
+    },
+    {
+      "id": "beamrunner.gems.medium",
+      "type": "Consumable",
+      "gems": 6000,
+      "title": "Gem Vault",
+      "description": "6,000 gems.",
+      "fallbackPrice": "$4.99"
+    },
+    {
+      "id": "beamrunner.gems.large",
+      "type": "Consumable",
+      "gems": 15000,
+      "title": "Gem Hoard",
+      "description": "15,000 gems.",
+      "fallbackPrice": "$9.99"
+    }
+  ],
+
+  "privacyPolicyUrl": "https://docs.google.com/document/d/e/2PACX-1vQkXengMg6LCMTeQGc0lfRbSTtJBvkn24L7zX0g0fe5RCEm2-TIvNVdKVF_3umA-qMpexDRuM_pQRBx/pub",
+  "termsUrl": "https://docs.google.com/document/d/e/2PACX-1vRYFcGWXcqXUKYHtm4YS_JEGgnjn5tUKS3BqYmnrU61zA8N4yFv2HpCeTO3aRRRjV31QYBl4CHtPNED/pub",
+  "supportEmail": "chris.dornan4@gmail.com",
+
+  "androidPackage": "",
+  "iosAppId": "",
+
+  "crashReportingDsn": "",
+  "crashReportingInEditor": false
+}
