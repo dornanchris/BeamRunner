@@ -26,8 +26,5 @@ namespace BeamRunner.Game
 
         /// <summary>Results screen.</summary>
         GameOver,
-
-        /// <summary>At the top of a level wall: stats and a perk pick before the next level.</summary>
-        Checkpoint,
     }
 }

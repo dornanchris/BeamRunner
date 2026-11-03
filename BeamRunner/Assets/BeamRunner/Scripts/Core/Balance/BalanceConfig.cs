@@ -24,10 +24,10 @@ namespace BeamRunner.Core.Balance
         public float RampDownCost = 1f;
 
         /// <summary>Fuel at the start of a run (before upgrades).</summary>
-        public float StartFuel = 10f;
+        public float StartFuel = 12f;
 
         /// <summary>Most fuel the craft holds (before upgrades).</summary>
-        public float MaxFuel = 20f;
+        public float MaxFuel = 24f;
 
         /// <summary>Fuel one fuel cell gives.</summary>
         public float FuelPickupValue = 3f;

@@ -7,17 +7,18 @@ namespace BeamRunner.Core.Field
     /// The level plan — the one file to edit for pacing. A run is a sequence of levels on the course (tiles from the start
     /// of level 1). Levels 1–4 teach building with missing track only (bridges, ramps, the edges, fuel); from level 5
     /// obstacles force route changes; from level 13 the plateau cycles the mixed kinds. Each level opens with
-    /// <see cref="IntroTiles"/> of full middle-layer track and ends with a runway and the wall that carries the craft into
-    /// the next level. The planned speed rises linearly (in distance) from <see cref="StartSpeed"/> at level 1 to
-    /// <see cref="MaxSpeed"/> at the plateau and stays there.
+    /// <see cref="IntroTiles"/> of full middle-layer track and ends with a runway and the wall the craft turns up into
+    /// the next level (levels are short: a wall every 15–20 s). The planned speed rises linearly (in distance) from
+    /// <see cref="StartSpeed"/> at level 1 to <see cref="MaxSpeed"/> at the plateau and stays there. Each kind leans hard
+    /// on its signature chunks (see <see cref="Build"/>), so consecutive levels play differently.
     /// </summary>
     public static class Levels
     {
         /// <summary>Planned speed at the start of level 1 (m/s).</summary>
-        public const float StartSpeed = 14f;
+        public const float StartSpeed = 19.8f;
 
         /// <summary>Planned speed from the plateau level on (m/s).</summary>
-        public const float MaxSpeed = 26f;
+        public const float MaxSpeed = 30f;
 
         /// <summary>Levels with a fixed kind; later levels cycle <see cref="PlateauCycle"/>.</summary>
         public const int NamedLevels = 12;
@@ -140,15 +141,15 @@ namespace BeamRunner.Core.Field
         {
             if (number <= 1)
             {
-                return 44;
+                return 36;
             }
 
             if (number <= 4)
             {
-                return 52;
+                return 44;
             }
 
-            return number >= PlateauLevel ? 68 : 60;
+            return number >= PlateauLevel ? 60 : 52;
         }
 
         /// <summary>Course tile where level <paramref name="number"/> starts.</summary>
@@ -255,34 +256,36 @@ namespace BeamRunner.Core.Field
                 FuelScale = number <= 3 ? 1f : MathUtil.Lerp(0.9f, 0.7f, t),
             };
 
-            // Weights indexed by ChunkTag: Bridge, Ramp, Edge, Obstacle, Gems, Fuel.
+            // Weights indexed by ChunkTag: Bridge, Ramp, Edge, Obstacle, Gems, Fuel. Each kind's signature tag dominates
+            // (the others stay low so the level still mixes a little), so the walls separate levels that feel different.
             switch (s.Kind)
             {
                 case LevelKind.Bridges:
                     Weights(s, 1f, 0f, 0f, 0f, 0.3f, 0.3f);
                     break;
                 case LevelKind.Ramps:
-                    Weights(s, 0.5f, 1f, 0f, 0f, 0.6f, 0.3f);
+                    Weights(s, 0.2f, 1f, 0f, 0f, 0.5f, 0.25f);
                     break;
                 case LevelKind.Edges:
-                    Weights(s, 0.5f, 0.6f, 1f, 0f, 0.4f, 0.3f);
+                    Weights(s, 0.15f, 0.3f, 1f, 0f, 0.3f, 0.25f);
                     break;
                 case LevelKind.FuelLine:
-                    Weights(s, 1f, 0.6f, 0.5f, 0f, 0.4f, 0.15f);
+                    Weights(s, 1f, 0.3f, 0.2f, 0f, 0.25f, 0.1f);
                     s.FuelScale *= 0.85f;
+                    s.ChunkGap *= 0.8f;
                     break;
                 case LevelKind.Blockade:
-                    Weights(s, 0.5f, 0.5f, 0.3f, 1f, 0.3f, 0.25f);
+                    Weights(s, 0.15f, 0.2f, 0.1f, 1f, 0.2f, 0.25f);
                     break;
                 case LevelKind.Switchback:
-                    Weights(s, 0.5f, 1f, 0.4f, 0.8f, 0.4f, 0.25f);
+                    Weights(s, 0.15f, 1f, 0.2f, 0.6f, 0.3f, 0.25f);
                     break;
                 case LevelKind.Skyline:
-                    Weights(s, 0.6f, 0.6f, 1f, 0.5f, 0.8f, 0.25f);
+                    Weights(s, 0.2f, 0.4f, 1f, 0.2f, 1f, 0.2f);
                     break;
                 case LevelKind.Overload:
                     Weights(s, 0.8f, 0.8f, 0.8f, 0.9f, 0.4f, 0.2f);
-                    s.ChunkGap *= 0.8f;
+                    s.ChunkGap *= 0.7f;
                     break;
                 default: // Gauntlet
                     Weights(s, 0.8f, 0.8f, 0.8f, 0.8f, 0.4f, 0.25f);

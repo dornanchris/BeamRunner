@@ -67,8 +67,8 @@ namespace BeamRunner.PlayModeTests
             yield return StartRun();
             Assert.IsTrue(Game.RunIsTutorial, "The first run must be the tutorial. " + Describe());
 
-            // Fly most of level 1, past its first gaps (> 300 m also completes the tutorial).
-            Assert.Greater(FirstRunMetres, 300.0, "Level 1 is too short for the tutorial check below.");
+            // Fly most of level 1, past its first gaps (far enough to complete the tutorial).
+            Assert.Greater(FirstRunMetres, (double)ProfileService.TutorialCompleteMetres, "Level 1 is too short for the tutorial check below.");
             yield return FlyWithBot(FirstRunMetres);
             Assert.Greater(Game.RunScore, 0L, "No score after " + FirstRunMetres + " m. " + Describe());
             Assert.AreEqual(1, Game.RunLevel, "The first run starts at level 1 (the bot stops short of its wall). " + Describe());
@@ -81,7 +81,7 @@ namespace BeamRunner.PlayModeTests
             Assert.IsTrue(Game.DeclineRevive(), "NO THANKS was refused. " + Describe());
             Assert.AreEqual("GameOver", Game.FlowState, Describe());
             Assert.AreEqual(1, Game.RunsPlayed, "The run was not counted. " + Describe());
-            Assert.IsTrue(Game.TutorialDone, "A first run past 300 m must complete the tutorial. " + Describe());
+            Assert.IsTrue(Game.TutorialDone, "A long enough first run must complete the tutorial. " + Describe());
             Assert.Greater(Game.BestScore, 0L, Describe());
 
             yield return ResultsToMenu();

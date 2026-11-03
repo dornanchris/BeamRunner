@@ -14,6 +14,9 @@ namespace BeamRunner.Rendering
     public sealed class SpeedLines : MonoBehaviour
     {
         private const int MaxLines = 72;
+
+        /// <summary>BeamRunner shows fewer streaks than CubeField did: the rails already carry the sense of speed.</summary>
+        private const float BeamRunnerDensity = 0.65f;
         private const float FarZ = 95f;
         private const float NearZ = -9f;
 
@@ -83,7 +86,7 @@ namespace BeamRunner.Rendering
 
             float s01 = Mathf.Clamp01(speed01);
             float coverage = Mathf.Clamp01((s01 - 0.12f) / 0.88f) * 0.75f + (overdrive ? 0.25f : 0f);
-            int wanted = Mathf.RoundToInt(MaxLines * coverage * _density);
+            int wanted = Mathf.RoundToInt(MaxLines * coverage * _density * BeamRunnerDensity);
             float baseLength = Mathf.Lerp(1.5f, 9f, s01) * (overdrive ? 1.6f : 1f);
             float fade = 1f - Mathf.Exp(-6f * dt);
 

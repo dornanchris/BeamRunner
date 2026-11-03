@@ -139,7 +139,7 @@ namespace BeamRunner.UI
                     if (live)
                     {
                         FlushPendingPopup();
-                        SpawnAtShip(Loc.T("hud.full_trail") + "  +" + RunUi.Grouped(e.Count), UITheme.AccentYellow, PopupRise + 50f, 1.15f, false);
+                        SpawnAtShip(Loc.T("hud.full_trail") + "  +" + RunUi.Grouped(e.Count), UITheme.AccentYellow, PopupRise + 50f, 0.85f, false);
                         PunchScore();
                     }
 
@@ -191,6 +191,15 @@ namespace BeamRunner.UI
 
                 case RunEventType.LevelCleared:
                     ShowLevelCleared(e.Count, (int)e.Value);
+                    break;
+
+                case RunEventType.PerkApplied:
+                    if (live)
+                    {
+                        // The wall's perk, picked for the pilot: named under the level-clear bonus.
+                        SpawnAtShip(Loc.T(PerkNameKey((CheckpointPerk)e.Count)), UITheme.AccentCyan, PopupRise - 50f, 1f, false);
+                    }
+
                     break;
 
                 case RunEventType.TutorialHint:
@@ -465,22 +474,22 @@ namespace BeamRunner.UI
             switch (kind)
             {
                 case PickupKind.Shield:
-                    SpawnAtShip(Loc.T("hud.shield"), UITheme.AccentCyan, 240f, 1.05f, false);
+                    SpawnAtShip(Loc.T("hud.shield"), UITheme.AccentCyan, 240f, 0.8f, false);
                     break;
                 case PickupKind.Magnet:
-                    SpawnAtShip(Loc.T("hud.magnet"), UITheme.AccentPurple, 240f, 1.05f, false);
+                    SpawnAtShip(Loc.T("hud.magnet"), UITheme.AccentPurple, 240f, 0.8f, false);
                     break;
                 case PickupKind.Overload:
-                    SpawnAtShip(Loc.T("hud.overload_cell"), UITheme.AccentYellow, 240f, 1.05f, false);
+                    SpawnAtShip(Loc.T("hud.overload_cell"), UITheme.AccentYellow, 240f, 0.8f, false);
                     break;
                 case PickupKind.InstantBuild:
-                    SpawnAtShip(Loc.T("hud.free_builds"), UITheme.AccentCyan, 240f, 1.05f, false);
+                    SpawnAtShip(Loc.T("hud.free_builds"), UITheme.AccentCyan, 240f, 0.8f, false);
                     break;
                 case PickupKind.Repair:
-                    SpawnAtShip(Loc.T("hud.repaired"), UITheme.AccentMagenta, 240f, 1.05f, false);
+                    SpawnAtShip(Loc.T("hud.repaired"), UITheme.AccentMagenta, 240f, 0.8f, false);
                     break;
                 case PickupKind.Fuel:
-                    SpawnAtShip(Loc.T("hud.fuel_plus", ("n", _fuelPopupValue)), new Color(0.35f, 1f, 0.45f), 180f, 0.75f, true);
+                    SpawnAtShip(Loc.T("hud.fuel_plus", ("n", _fuelPopupValue)), new Color(0.35f, 1f, 0.45f), 180f, 0.55f, true);
                     UITween.Punch(_meterRoot, 0.06f, 0.3f);
                     break;
             }
@@ -543,6 +552,26 @@ namespace BeamRunner.UI
             UITween.Fade(_mileGroup, 0f, 1f, 0.2f).SetEase(UIEase.OutCubic);
             UITween.Scale(_mileRoot, 0.4f, 1f, 0.5f).SetEase(UIEase.OutBack);
             _mileHide = UITween.Delay(this, 1.5f, HideMilestone).Id;
+        }
+
+        // Literals so tools/check-strings.py sees every key used.
+        private static string PerkNameKey(CheckpointPerk perk)
+        {
+            switch (perk)
+            {
+                case CheckpointPerk.Refuel:
+                    return "perk.refuel";
+                case CheckpointPerk.Patch:
+                    return "perk.patch";
+                case CheckpointPerk.Shield:
+                    return "perk.shield";
+                case CheckpointPerk.Efficiency:
+                    return "perk.efficiency";
+                case CheckpointPerk.BigTank:
+                    return "perk.big_tank";
+                default:
+                    return "perk.longer_boosts";
+            }
         }
 
         private void HideMilestone()

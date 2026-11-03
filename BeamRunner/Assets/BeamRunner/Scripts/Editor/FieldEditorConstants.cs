@@ -58,7 +58,7 @@ namespace BeamRunner.EditorTools
         /// <summary>Shader names the renderer looks up with <c>Shader.Find</c>.</summary>
         public static readonly string[] RequiredShaderNames =
         {
-            "BeamRunner/Grid",
+            "BeamRunner/Surface",
             "BeamRunner/Sky",
             "BeamRunner/NeonSolid",
             "BeamRunner/Additive",

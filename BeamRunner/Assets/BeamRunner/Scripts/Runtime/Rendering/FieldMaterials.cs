@@ -18,8 +18,7 @@ namespace BeamRunner.Rendering
     /// </remarks>
     public static class FieldMaterials
     {
-        private static Material _floor;
-        private static Material _ceiling;
+        private static Material _surface;
         private static Material _sky;
         private static Material _obstacle;
         private static Material _obstacleDithered;
@@ -30,54 +29,25 @@ namespace BeamRunner.Rendering
         private static readonly Dictionary<long, Material> HologramCache = new Dictionary<long, Material>();
         private static readonly Dictionary<int, Material> AdditiveCache = new Dictionary<int, Material>();
 
-        /// <summary>The floor under the play field: opaque dark plane with the full neon grid (Grid shader).</summary>
-        public static Material Floor()
-        {
-            if (_floor == null)
-            {
-                _floor = Create(FieldShaders.Grid, "BeamRunner Floor");
-                SetGridDefaults(_floor);
-                // The floor lies far below the void: a dim grid, so the rails above it stay the brightest lines.
-                _floor.SetFloat(ShaderIds.GridIntensity, 0.4f);
-                _floor.SetFloat(ShaderIds.RailIntensity, 0.3f);
-                _floor.SetFloat(ShaderIds.StreakIntensity, 0.35f);
-                _floor.SetFloat(ShaderIds.BaseAmount, 1f);
-                _floor.SetFloat(ShaderIds.SrcBlend, (float)BlendMode.One);
-                _floor.SetFloat(ShaderIds.DstBlend, (float)BlendMode.Zero);
-                _floor.SetFloat(ShaderIds.ZWrite, 1f);
-                _floor.renderQueue = (int)RenderQueue.Geometry;
-                SetFallbackColor(_floor, new Color(0.05f, 0.03f, 0.12f));
-            }
-
-            return _floor;
-        }
-
         /// <summary>
-        /// The ceiling above the play field: the same grid drawn additively with no body (the sky shows through),
-        /// dimmer, without speed streaks. Transparent queue.
+        /// The megastructure surface under the track, its turn up into the wall and the wall ahead (Surface shader,
+        /// opaque; colours and patterns are globals).
         /// </summary>
-        public static Material Ceiling()
+        public static Material Surface()
         {
-            if (_ceiling == null)
+            if (_surface == null)
             {
-                _ceiling = Create(FieldShaders.Grid, "BeamRunner Ceiling");
-                SetGridDefaults(_ceiling);
-                _ceiling.SetFloat(ShaderIds.BaseAmount, 0f);
-                _ceiling.SetFloat(ShaderIds.GridIntensity, 0.35f);
-                _ceiling.SetFloat(ShaderIds.RailIntensity, 0.45f);
-                _ceiling.SetFloat(ShaderIds.PulseIntensity, 0.4f);
-                _ceiling.SetFloat(ShaderIds.StreakIntensity, 0f);
-                _ceiling.SetFloat(ShaderIds.SrcBlend, (float)BlendMode.One);
-                _ceiling.SetFloat(ShaderIds.DstBlend, (float)BlendMode.One);
-                _ceiling.SetFloat(ShaderIds.ZWrite, 0f);
-                _ceiling.renderQueue = (int)RenderQueue.Transparent;
-                SetFallbackColor(_ceiling, new Color(0.05f, 0.03f, 0.12f));
+                _surface = Create(FieldShaders.Surface, "BeamRunner Surface");
+                _surface.renderQueue = (int)RenderQueue.Geometry;
+                _surface.SetFloat(ShaderIds.HalfWidth, SurfaceView.HalfWidth);
+                _surface.SetFloat(ShaderIds.SideHeight, SurfaceView.WallHeight);
+                SetFallbackColor(_surface, new Color(0.03f, 0.025f, 0.07f));
             }
 
-            return _ceiling;
+            return _surface;
         }
 
-        /// <summary>The procedural sky (gradient, horizon band, stars, sun), drawn after the opaque geometry.</summary>
+        /// <summary>The procedural sky (haze, nebula, stars, beacon), drawn after the opaque geometry.</summary>
         public static Material Sky(float radius)
         {
             if (_sky == null)
@@ -88,16 +58,6 @@ namespace BeamRunner.Rendering
 
             _sky.SetFloat(ShaderIds.Radius, radius);
             return _sky;
-        }
-
-        private static void SetGridDefaults(Material m)
-        {
-            m.SetFloat(ShaderIds.GridIntensity, 1f);
-            m.SetFloat(ShaderIds.RailIntensity, 1f);
-            m.SetFloat(ShaderIds.PulseIntensity, 1f);
-            m.SetFloat(ShaderIds.StreakIntensity, 1f);
-            m.SetFloat(ShaderIds.CellSize, FieldSpec.CellSize);
-            m.SetFloat(ShaderIds.HalfExtent, FieldSpec.HalfExtent);
         }
 
         /// <summary>

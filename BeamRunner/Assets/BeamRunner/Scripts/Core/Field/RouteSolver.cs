@@ -6,9 +6,9 @@ namespace BeamRunner.Core.Field
     /// Plans routes through the rail grid: "with this much fuel, which (lane, layer) can a pilot still be on at tile t, and
     /// with how much fuel left at best?" A dynamic program over tiles whose state is the craft's lane and layer as it
     /// enters a tile plus what it built on that tile; the value is the most fuel it can have there (−1 = unreachable).
-    /// Moves follow the game's rules conservatively: one lane switch per tile, and only while riding flat rail into flat
-    /// rail; builds cost fuel and fill the next tile; gaps, obstacles, the ceiling and the void end the route (a fair
-    /// route never needs a fall). Used by the generator (only affordable chunks are placed), the autopilot and the tests.
+    /// Moves follow the game's rules: every move is a build on the next tile — a bridge, a ramp up or down (fuel) or a
+    /// diagonal into the next lane (a switch: free over rail, a bridge's price over a gap) — or riding what is there; gaps, obstacles, the ceiling and the void
+    /// end the route (a fair route never needs a fall). Used by the generator (only affordable chunks are placed), the autopilot and the tests.
     /// </summary>
     public sealed class RouteSolver
     {
@@ -17,7 +17,7 @@ namespace BeamRunner.Core.Field
 
         public const float Unreachable = -1f;
 
-        private const int BuildKinds = 4;
+        private const int BuildKinds = 6;
 
         /// <summary>Reads the generated cell at (tile, lane, layer).</summary>
         public delegate CellType CellReader(long tile, int lane, int layer);
@@ -111,48 +111,41 @@ namespace BeamRunner.Core.Field
                 int lane = LaneOf(s);
                 int layer = LayerOf(s);
                 BuildKind built = BuiltOf(s);
+                int exitLane;
                 int exitLayer;
-                bool flat;
-                if (!Ride(tile, lane, layer, built, cell, out exitLayer, out flat))
+                if (!Ride(tile, lane, layer, built, cell, out exitLane, out exitLayer))
                 {
                     continue;
                 }
 
                 f = Math.Min(MaxFuel, f + (fuel != null ? fuel(tile, lane, layer) : 0f));
-                for (int d = -1; d <= 1; d++)
+                CellType next = cell(tile + 1, exitLane, exitLayer);
+                for (int b = 0; b < BuildKinds; b++)
                 {
-                    int l2 = lane + d;
-                    if (l2 < 0 || l2 >= FieldSpec.LaneCount)
+                    var kind = (BuildKind)b;
+                    float cost = Cells.IsSwitch(kind) ? (next == CellType.Empty ? BridgeCost : 0f) : Cost(kind);
+                    if (cost > f + 1e-4f)
                     {
                         continue;
                     }
 
-                    if (d != 0 && (!flat || cell(tile, l2, layer) != CellType.Track))
+                    if (kind != BuildKind.None && (next == CellType.Obstacle || next == CellType.Wall))
                     {
-                        continue;
+                        continue; // building into an obstacle crashes; the wall can't be built on
                     }
 
-                    CellType next = cell(tile + 1, l2, exitLayer);
-                    for (int b = 0; b < BuildKinds; b++)
+                    int toLane = exitLane + (kind == BuildKind.SwitchLeft ? -1 : kind == BuildKind.SwitchRight ? 1 : 0);
+                    if (toLane < 0 || toLane >= FieldSpec.LaneCount ||
+                        toLane != exitLane && cell(tile + 1, toLane, exitLayer) == CellType.Obstacle)
                     {
-                        var kind = (BuildKind)b;
-                        float cost = Cost(kind);
-                        if (cost > f + 1e-4f)
-                        {
-                            continue;
-                        }
+                        continue; // a diagonal runs into the next lane over its tile: never through a cube there
+                    }
 
-                        if (kind != BuildKind.None && (next == CellType.Obstacle || next == CellType.Wall))
-                        {
-                            continue; // building into an obstacle crashes; the wall can't be built on
-                        }
-
-                        int t = State(l2, exitLayer, kind);
-                        float left = f - cost;
-                        if (left > to[t])
-                        {
-                            to[t] = left;
-                        }
+                    int t = State(exitLane, exitLayer, kind);
+                    float left = f - cost;
+                    if (left > to[t])
+                    {
+                        to[t] = left;
                     }
                 }
             }
@@ -160,9 +153,9 @@ namespace BeamRunner.Core.Field
 
         /// <summary>
         /// Rides one cell: false if it ends the route (a gap, an obstacle, the ceiling, the void or a closed layer);
-        /// otherwise the layer the craft leaves it on and whether it was flat rail (lane switches allowed).
+        /// otherwise the lane and layer the craft leaves it on.
         /// </summary>
-        public bool Ride(long tile, int lane, int layer, BuildKind built, CellReader cell, out int exitLayer, out bool flat)
+        public bool Ride(long tile, int lane, int layer, BuildKind built, CellReader cell, out int exitLane, out int exitLayer)
         {
             CellType c = cell(tile, lane, layer);
             if (built != BuildKind.None && c != CellType.Wall)
@@ -171,8 +164,8 @@ namespace BeamRunner.Core.Field
                 c = c == CellType.Obstacle ? CellType.Empty : Cells.FromBuild(built);
             }
 
+            exitLane = lane;
             exitLayer = layer;
-            flat = false;
             if (c == CellType.Empty || c == CellType.Obstacle)
             {
                 return false;
@@ -180,13 +173,12 @@ namespace BeamRunner.Core.Field
 
             if (c == CellType.Wall)
             {
-                flat = true;
                 return true;
             }
 
+            exitLane = lane + Cells.LaneDelta(c);
             exitLayer = layer + Cells.LayerDelta(c);
-            flat = c == CellType.Track;
-            return exitLayer >= 0 && exitLayer <= MaxLayer;
+            return exitLayer >= 0 && exitLayer <= MaxLayer && exitLane >= 0 && exitLane < FieldSpec.LaneCount;
         }
     }
 }

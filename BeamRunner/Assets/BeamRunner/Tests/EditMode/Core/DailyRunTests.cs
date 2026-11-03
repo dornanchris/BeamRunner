@@ -114,13 +114,7 @@ namespace BeamRunner.Core.Tests
                 b.Step(1f / 60f, Diagnostics.RunAutopilot.FollowLine(b));
                 a.ClearEvents();
                 b.ClearEvents();
-                Assert.AreEqual(a.AtCheckpoint, b.AtCheckpoint, "frame " + i);
-                if (a.AtCheckpoint)
-                {
-                    // The Daily Run waits at each wall for the pilot: both continue with the same perk.
-                    a.ContinueFromCheckpoint(CheckpointPerk.Refuel);
-                    b.ContinueFromCheckpoint(CheckpointPerk.Refuel);
-                }
+                Assert.AreEqual(a.IsClimbing, b.IsClimbing, "frame " + i);
             }
 
             Assert.AreEqual(a.Distance, b.Distance);

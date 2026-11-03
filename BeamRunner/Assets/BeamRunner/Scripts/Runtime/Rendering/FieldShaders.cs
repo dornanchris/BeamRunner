@@ -16,7 +16,7 @@ namespace BeamRunner.Rendering
     /// </remarks>
     public static class FieldShaders
     {
-        public const string GridName = "BeamRunner/Grid";
+        public const string SurfaceName = "BeamRunner/Surface";
         public const string SkyName = "BeamRunner/Sky";
         public const string NeonSolidName = "BeamRunner/NeonSolid";
         public const string AdditiveName = "BeamRunner/Additive";
@@ -40,9 +40,9 @@ namespace BeamRunner.Rendering
         private static readonly HashSet<string> Missing = new HashSet<string>();
         private static bool _warned;
 
-        public static Shader Grid
+        public static Shader Surface
         {
-            get { return Get(GridName); }
+            get { return Get(SurfaceName); }
         }
 
         public static Shader Sky

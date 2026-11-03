@@ -26,14 +26,14 @@ namespace BeamRunner.Core.Field
     }
 
     /// <summary>
-    /// A hand-built stretch of track: a few tiles of the 3 × 3 rail grid with its gaps, ramps, obstacles and pickups.
-    /// The generator stitches chunks together (mirrored half of the time) between stretches of plain track, and only
-    /// places one the run can afford (<see cref="RouteSolver"/>). Written as text: rows (tiles) separated by commas, each
-    /// an optional repeat count (<c>3x</c>) and then three groups of three cells — bottom, middle and top layer, lanes left
-    /// to right — e.g. <c>"=== =.= ..."</c>. Cells: <c>.</c> gap, <c>=</c> rail, <c>^</c> ramp up, <c>v</c> ramp down,
-    /// <c>#</c> obstacle, <c>o</c> optional obstacle (rail when the adaptive roll says no), <c>g</c> rail + gems,
-    /// <c>*</c> gap + gems (reached only by building), <c>f</c> rail + fuel, <c>F</c> gap + fuel, <c>s</c> rail + shield,
-    /// <c>r</c> rail + repair, <c>p</c> rail + a power-up when one is due (gems otherwise).
+    /// A stretch of track: a few tiles of the 3 × 3 rail grid with its gaps, ramps, obstacles and pickups — a route beat
+    /// (<see cref="RouteBeats"/>) the generator checks with the <see cref="RouteSolver"/> before it commits it. Written as
+    /// rows of cell codes, or as text: rows (tiles) separated by commas, each an optional repeat count (<c>3x</c>) and then
+    /// three groups of three cells — bottom, middle and top layer, lanes left to right — e.g. <c>"=== =.= ..."</c>. Cells:
+    /// <c>.</c> gap, <c>=</c> rail, <c>^</c> ramp up, <c>v</c> ramp down, <c>#</c> obstacle, <c>o</c> optional obstacle
+    /// (rail when the adaptive roll says no), <c>g</c> rail + gems, <c>f</c> rail + fuel, <c>s</c> rail + shield,
+    /// <c>r</c> rail + repair, <c>p</c> rail + a power-up when one is due (gems otherwise). Pickups only ever ride on
+    /// rails: a pickup over a gap reads as track that isn't there.
     /// </summary>
     public sealed class Chunk
     {
@@ -53,11 +53,17 @@ namespace BeamRunner.Core.Field
         public readonly bool HasObstacles;
 
         public Chunk(string id, ChunkTag tag, int tier, string rows)
+            : this(id, tag, tier, Parse(rows))
+        {
+        }
+
+        /// <summary>A chunk from rows of cell codes (each <see cref="FieldSpec.CellsPerRow"/> long, by <see cref="FieldSpec.CellIndex"/>).</summary>
+        public Chunk(string id, ChunkTag tag, int tier, char[][] rows)
         {
             Id = id;
             Tag = tag;
             Tier = tier;
-            Rows = Parse(rows);
+            Rows = rows;
             for (int r = 0; r < Rows.Length; r++)
             {
                 for (int i = 0; i < FieldSpec.CellsPerRow; i++)
@@ -92,7 +98,7 @@ namespace BeamRunner.Core.Field
             return Rows[row][FieldSpec.CellIndex(lane, layer)];
         }
 
-        /// <summary>The rail a cell code stands for (pickups ride on rails or float over gaps).</summary>
+        /// <summary>The rail a cell code stands for.</summary>
         public static CellType CellOf(char code, bool obstacleRoll)
         {
             switch (code)
@@ -120,13 +126,13 @@ namespace BeamRunner.Core.Field
         /// <summary>Fuel cells a code holds (before the level's fuel scale).</summary>
         public static bool HoldsFuel(char code)
         {
-            return code == 'f' || code == 'F';
+            return code == 'f';
         }
 
         /// <summary>True if a code holds gems.</summary>
         public static bool HoldsGems(char code)
         {
-            return code == 'g' || code == '*';
+            return code == 'g';
         }
 
         private static char[][] Parse(string text)
@@ -166,7 +172,7 @@ namespace BeamRunner.Core.Field
 
                     for (int lane = 0; lane < FieldSpec.LaneCount; lane++)
                     {
-                        if ("=.^v#ogf*Fsrp".IndexOf(g[lane]) < 0)
+                        if ("=.^v#ogfsrp".IndexOf(g[lane]) < 0)
                         {
                             throw new FormatException("Unknown chunk cell '" + g[lane] + "' in '" + s + "'");
                         }

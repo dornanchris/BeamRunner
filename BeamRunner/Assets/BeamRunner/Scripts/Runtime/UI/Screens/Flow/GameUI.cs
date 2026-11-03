@@ -56,7 +56,6 @@ namespace BeamRunner.UI
         private CountdownOverlay _countdown;
         private PauseScreen _pause;
         private ReviveScreen _revive;
-        private CheckpointScreen _checkpoint;
         private DailyRewardScreen _daily;
 
         private ZoneTheme _theme;
@@ -261,8 +260,6 @@ namespace BeamRunner.UI
             _pause.Bind(game, ShowSettings);
             _revive = UIScreen.CreateDeferred<ReviveScreen>(popups);
             _revive.Bind(game);
-            _checkpoint = UIScreen.CreateDeferred<CheckpointScreen>(popups);
-            _checkpoint.Bind(game);
             _daily = UIScreen.CreateDeferred<DailyRewardScreen>(popups);
             SafeCall(() => _daily.Bind(game));
 
@@ -313,7 +310,6 @@ namespace BeamRunner.UI
             queue.Enqueue(_countdown);
             queue.Enqueue(_pause);
             queue.Enqueue(_revive);
-            queue.Enqueue(_checkpoint);
             queue.Enqueue(_results);
             queue.Enqueue(() => Toasts.Prewarm(2));
         }
@@ -460,16 +456,6 @@ namespace BeamRunner.UI
 
                     stack.SetRoot(_results);
                     break;
-
-                case GameState.Checkpoint:
-                    _countdown.HideNow();
-                    if (_hud.IsVisible)
-                    {
-                        _hud.SetDimmed(true, PausedHudAlpha);
-                    }
-
-                    stack.SetRoot(_checkpoint);
-                    break;
             }
 
             ApplyBackEnabled();
@@ -525,8 +511,7 @@ namespace BeamRunner.UI
             }
 
             GameState s = _game.State;
-            if (s == GameState.Boot || s == GameState.Countdown || s == GameState.Running || s == GameState.Crashed ||
-                s == GameState.Checkpoint)
+            if (s == GameState.Boot || s == GameState.Countdown || s == GameState.Running || s == GameState.Crashed)
             {
                 return;
             }

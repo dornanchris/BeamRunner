@@ -36,9 +36,10 @@ namespace BeamRunner.Core.Meta
         /// 5: Spiral walls block three quarters from a random side, deadly edges in Drift levels, denser gem trails.
         /// 6: shorter early levels and level gaps, Spiral walls closer together, gliding holes, half the gem trails
         /// through cubes, cubes along the edges of early cube fields, retuned Crossfire / Shifting Needle / Gauntlet.
-        /// BeamRunner restarts the count: 1 = the 3-lane chunk generator.
+        /// BeamRunner restarts the count: 1 = the 3-lane chunk generator. 2: shorter levels, sharper level kinds, faster
+        /// speed curve, the wall ridden up without a checkpoint stop, one forced route of beats instead of chunks.
         /// </remarks>
-        public const int GeneratorVersion = 1;
+        public const int GeneratorVersion = 2;
 
         /// <summary>
         /// No continue after a crash in the Daily Run. Fairness: it is the one mode whose score is compared between

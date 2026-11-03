@@ -14,25 +14,19 @@ namespace BeamRunner.Core.Sim
         /// <summary>Off its rail, dropping toward the layer below.</summary>
         Falling,
 
-        /// <summary>Being carried up the wall at the end of a level.</summary>
+        /// <summary>Riding the bend up the wall at the end of a level onto the next level's middle layer.</summary>
         Climbing,
-
-        /// <summary>Waiting at the top of the wall for the checkpoint to be closed.</summary>
-        Checkpoint,
-
-        /// <summary>Dropping from the wall onto the next level's middle layer.</summary>
-        Descending,
     }
 
     /// <summary>
     /// The complete rules of a run, independent of Unity: riding the rails of the 3 lanes × 3 layers grid, lane switches,
     /// building bridges and ramps on the next tile with fuel, falls (one layer = damage, two = death), the ceiling and the
     /// void, obstacles, pickups and power-ups (shield, magnet, Overload, instant build, repair), gem trails, scoring, the
-    /// wall checkpoint between levels and tutorial prompts.
+    /// wall between levels (ridden up without stopping, with a perk picked for the pilot) and tutorial prompts.
     /// <para>
     /// Call <see cref="Step"/> once per rendered frame with the frame's delta time and input; it sub-steps internally at
     /// ≤ 1/120 s. Read the public state to render, and consume <see cref="Events"/> for feedback (clear them with
-    /// <see cref="ClearEvents"/> once handled). At a checkpoint the run waits for <see cref="ContinueFromCheckpoint"/>.
+    /// <see cref="ClearEvents"/> once handled).
     /// </para>
     /// </summary>
     public sealed class RunSimulation
@@ -50,16 +44,11 @@ namespace BeamRunner.Core.Sim
         /// <summary>Gravity of a fall (m/s²): one layer takes about 0.4 s.</summary>
         public const float Gravity = 38f;
 
-        /// <summary>Seconds to climb the wall, and to drop from it into the next level.</summary>
-        public const float ClimbSeconds = 0.9f;
-
-        public const float DescendSeconds = 0.75f;
-
-        /// <summary>Seconds a bot or the menu background waits at a checkpoint.</summary>
-        public const float AutoCheckpointSeconds = 0.5f;
-
-        /// <summary>Height of the top of the wall (it rises from the void to just above the ceiling).</summary>
-        public const float WallTopY = FieldSpec.CeilingY + 0.5f;
+        /// <summary>
+        /// Seconds the bend up the wall takes (the wall tile, whatever the speed): the craft turns onto the wall and rides
+        /// on into the next level without stopping.
+        /// </summary>
+        public const float ClimbSeconds = 0.5f;
 
         /// <summary>Base lead time (s) of the gap warning before the adaptive multiplier.</summary>
         public const float GhostLeadSeconds = 1.1f;
@@ -121,7 +110,6 @@ namespace BeamRunner.Core.Sim
         private float _phaseFromY;
         private float _phaseToY;
         private float _phaseT;
-        private float _checkpointWait;
         private float _costScale = 1f;
         private float _durationScale = 1f;
         private bool _fuelLowAnnounced;
@@ -242,10 +230,10 @@ namespace BeamRunner.Core.Sim
             get { return Phase == RunPhase.Falling; }
         }
 
-        /// <summary>True while the run waits at a level wall for <see cref="ContinueFromCheckpoint"/>.</summary>
-        public bool AtCheckpoint
+        /// <summary>True while the craft rides the bend up a level wall.</summary>
+        public bool IsClimbing
         {
-            get { return Phase == RunPhase.Checkpoint; }
+            get { return Phase == RunPhase.Climbing; }
         }
 
         /// <summary>Current level (1-based).</summary>
@@ -263,7 +251,7 @@ namespace BeamRunner.Core.Sim
         /// <summary>0..1 progress through the current level.</summary>
         public float LevelProgress01
         {
-            get { return Phase == RunPhase.Checkpoint || Phase == RunPhase.Climbing ? 1f : _course.Progress01(Distance); }
+            get { return Phase == RunPhase.Climbing ? 1f : _course.Progress01(Distance); }
         }
 
         public long Score
@@ -403,7 +391,7 @@ namespace BeamRunner.Core.Sim
             {
                 tile = _tile;
                 layer = _layer;
-                lane = Lane;
+                lane = RideLane();
             }
 
             TrackRow row = _grid.Row(tile);
@@ -422,7 +410,7 @@ namespace BeamRunner.Core.Sim
             }
 
             float lead = GhostLeadSeconds * _mods.GhostLead * Math.Max(1f, Speed);
-            int lane = _targetLane;
+            int lane = RideLane();
             int layer = _layer;
             long last = FieldSpec.TileOf(Distance + lead);
             for (long t = _tile; t <= last; t++)
@@ -436,6 +424,7 @@ namespace BeamRunner.Core.Sim
                     }
 
                     layer = Math.Max(0, Math.Min(FieldSpec.TopLayer, layer + Cells.LayerDelta(c)));
+                    lane = FieldSpec.ClampLane(lane + Cells.LaneDelta(c));
                     continue;
                 }
 
@@ -457,6 +446,7 @@ namespace BeamRunner.Core.Sim
                 }
 
                 layer = next;
+                lane = FieldSpec.ClampLane(lane + Cells.LaneDelta(c));
             }
 
             return -1;
@@ -484,20 +474,6 @@ namespace BeamRunner.Core.Sim
                 Hint(TutorialHint.Move);
             }
 
-            if (Phase == RunPhase.Checkpoint)
-            {
-                if (_config.AutoCheckpoint)
-                {
-                    _checkpointWait += dt;
-                    if (_checkpointWait >= AutoCheckpointSeconds)
-                    {
-                        ContinueFromCheckpoint(CheckpointPerk.None);
-                    }
-                }
-
-                return;
-            }
-
             if (input.UseAbsoluteLane)
             {
                 RequestLane(FieldSpec.ClampLane(input.AbsoluteLane) - _targetLane);
@@ -515,53 +491,10 @@ namespace BeamRunner.Core.Sim
 
             int steps = (int)Math.Ceiling(dt / MaxSubstep);
             float h = dt / steps;
-            for (int i = 0; i < steps && !IsCrashed && Phase != RunPhase.Checkpoint; i++)
+            for (int i = 0; i < steps && !IsCrashed; i++)
             {
                 Substep(h);
             }
-        }
-
-        /// <summary>
-        /// Leaves the checkpoint at the top of a wall with an optional perk: the craft drops onto the next level's middle
-        /// layer. False when not at a checkpoint.
-        /// </summary>
-        public bool ContinueFromCheckpoint(CheckpointPerk perk)
-        {
-            if (Phase != RunPhase.Checkpoint)
-            {
-                return false;
-            }
-
-            ApplyPerk(perk);
-            Phase = RunPhase.Descending;
-            _phaseT = 0f;
-            _phaseFromZ = Distance;
-            _phaseFromY = ShipY;
-            long next = _tile + 1;
-            _phaseToZ = FieldSpec.TileStart(next) + 1.0;
-            _phaseToY = FieldSpec.RideY(FieldSpec.MiddleLayer);
-            _layer = FieldSpec.MiddleLayer;
-            _level = _course.LevelOfTile(next);
-            _stats.LevelReached = Math.Max(_stats.LevelReached, _level);
-            Emit(RunEventType.LevelStarted, 0, _level);
-            if (_config.Tutorial && _level >= _course.StartLevel + 3)
-            {
-                Hint(TutorialHint.Complete);
-            }
-
-            return true;
-        }
-
-        /// <summary>Applies an extra perk while waiting at a checkpoint (the rewarded "take all three" bonus).</summary>
-        public bool GrantPerk(CheckpointPerk perk)
-        {
-            if (Phase != RunPhase.Checkpoint)
-            {
-                return false;
-            }
-
-            ApplyPerk(perk);
-            return true;
         }
 
         /// <summary>
@@ -637,6 +570,12 @@ namespace BeamRunner.Core.Sim
             Fuel = MathUtil.Clamp(fuel, 0f, _ship.MaxFuel);
         }
 
+        /// <summary>Test hook: sets the hull.</summary>
+        internal void DebugSetHull(int hull)
+        {
+            Hull = Math.Max(1, Math.Min(hull, _ship.MaxHull));
+        }
+
         /// <summary>Snapshot of the run's statistics (safe to call mid-run).</summary>
         public RunResult BuildResult()
         {
@@ -655,6 +594,13 @@ namespace BeamRunner.Core.Sim
         {
             if (shift == 0)
             {
+                return;
+            }
+
+            if (Phase == RunPhase.Riding)
+            {
+                // On the rails a swipe builds: a diagonal into the next lane on the next tile.
+                BuildSwitch(Math.Sign(shift));
                 return;
             }
 
@@ -717,6 +663,22 @@ namespace BeamRunner.Core.Sim
         /// </summary>
         private void Steer(float h)
         {
+            if (Phase == RunPhase.Riding)
+            {
+                // On a switch the craft follows the diagonal across the tile.
+                CellType c = _grid.Get(_tile, _entryLane, _layer);
+                if (Cells.IsSwitch(c))
+                {
+                    float along = MathUtil.Clamp01((float)((Distance - FieldSpec.TileStart(_tile)) / FieldSpec.TileLength));
+                    float a = FieldSpec.LaneX(_entryLane);
+                    float b = FieldSpec.LaneX(_entryLane + Cells.LaneDelta(c));
+                    float onDiagonal = a + (b - a) * MathUtil.SmoothStep(along);
+                    ShipVelocityX = h > 0f ? (onDiagonal - ShipX) / h : 0f;
+                    ShipX = onDiagonal;
+                    return;
+                }
+            }
+
             if (_queuedLaneShift != 0)
             {
                 if (Time - _queuedAt > LaneQueueSeconds)
@@ -748,6 +710,12 @@ namespace BeamRunner.Core.Sim
 
         private void TryBuild(BuildKind kind)
         {
+            if (Cells.IsSwitch(kind))
+            {
+                BuildSwitch(kind == BuildKind.SwitchLeft ? -1 : 1);
+                return;
+            }
+
             long tile;
             int lane;
             int layer;
@@ -823,6 +791,99 @@ namespace BeamRunner.Core.Sim
             CheckFuelLow();
         }
 
+        /// <summary>
+        /// A swipe on the rails: a diagonal rail on the next tile (the same piece of track a tap would build, only it ends
+        /// one lane over). Free where it replaces rail (switching beams); over a gap it is a bridge too and costs what a
+        /// bridge costs. Into a cube it crashes, as any build does.
+        /// </summary>
+        private void BuildSwitch(int direction)
+        {
+            long tile;
+            int lane;
+            int layer;
+            if (direction == 0 || !BuildTarget(out tile, out lane, out layer))
+            {
+                return;
+            }
+
+            int to = lane + direction;
+            CellType piece = direction < 0 ? CellType.SwitchLeft : CellType.SwitchRight;
+            CellType before = _grid.Get(tile, lane, layer);
+            if (to < 0 || to >= FieldSpec.LaneCount || before == piece)
+            {
+                return;
+            }
+
+            BuildKind kind = Cells.SwitchToward(direction);
+            float cost = SwitchCost(before);
+            if (Fuel + 1e-4f < cost)
+            {
+                _stats.EmptyBuilds++;
+                Emit(RunEventType.BuildFailed, 0, (int)kind, cost, FieldSpec.LaneX(lane), FieldSpec.RailY(layer),
+                    FieldSpec.TileStart(tile));
+                Hint(TutorialHint.Fuel);
+                return;
+            }
+
+            if (before == CellType.Obstacle && !BreakObstacle(tile, lane, layer, CrashCause.Obstacle))
+            {
+                return;
+            }
+
+            _grid.Set(tile, lane, layer, piece, (float)Time);
+            Emit(RunEventType.LaneChanged, (int)tile, to, direction, FieldSpec.LaneX(lane), FieldSpec.RailY(layer),
+                FieldSpec.TileStart(tile));
+            if (cost > 0f)
+            {
+                // Over a gap: a bridge that also changes lane.
+                Fuel = Math.Max(0f, Fuel - cost);
+                _stats.FuelSpent += cost;
+                _stats.Builds++;
+                _stats.Bridges++;
+                _stats.GapsBridged++;
+                _score += BuildPoints * _multiplier * (1f + _config.ScoreBonus);
+                AddChain();
+                Emit(RunEventType.Built, (int)tile, (int)kind, cost, FieldSpec.LaneX(lane), FieldSpec.RailY(layer),
+                    FieldSpec.TileStart(tile));
+                CheckFuelLow();
+            }
+            if (tile == _tile)
+            {
+                // A last-second switch under the craft.
+                _gapSince = -1.0;
+                _entryLane = lane;
+                EnterSwitch();
+                CheckCellOnEntry();
+            }
+        }
+
+        /// <summary>Fuel a diagonal costs on a cell: a bridge's price over a gap, nothing over rail.</summary>
+        public float SwitchCost(CellType target)
+        {
+            return target == CellType.Empty ? BuildCost(BuildKind.Bridge) : 0f;
+        }
+
+        /// <summary>The craft starts riding a switch: it heads for the lane the diagonal ends in.</summary>
+        private void EnterSwitch()
+        {
+            CellType c = _grid.Get(_tile, _entryLane, _layer);
+            if (!Cells.IsSwitch(c))
+            {
+                return;
+            }
+
+            _previousLane = _entryLane;
+            _laneChangeTime = Time;
+            _targetLane = FieldSpec.ClampLane(_entryLane + Cells.LaneDelta(c));
+            _queuedLaneShift = 0;
+        }
+
+        /// <summary>The lane whose cell the craft is riding (on a switch, the lane it entered the tile in).</summary>
+        private int RideLane()
+        {
+            return Phase == RunPhase.Riding && Cells.IsSwitch(_grid.Get(_tile, _entryLane, _layer)) ? _entryLane : Lane;
+        }
+
         private void CheckFuelLow()
         {
             float bridge = _ship.BridgeCost * _costScale;
@@ -844,7 +905,7 @@ namespace BeamRunner.Core.Sim
         private bool InLateBuildWindow()
         {
             return Phase == RunPhase.Riding && _gapSince >= 0.0 && Time - _gapSince <= _balance.LateBuildSeconds + 1e-6 &&
-                   _grid.Get(_tile, Lane, _layer) == CellType.Empty;
+                   _grid.Get(_tile, RideLane(), _layer) == CellType.Empty;
         }
 
         /// <summary>The layer the craft will be on when it enters the next tile.</summary>
@@ -874,9 +935,6 @@ namespace BeamRunner.Core.Sim
             {
                 case RunPhase.Climbing:
                     Climb(h);
-                    return;
-                case RunPhase.Descending:
-                    Descend(h);
                     return;
             }
 
@@ -959,7 +1017,7 @@ namespace BeamRunner.Core.Sim
                 }
             }
 
-            if (_overloadRemaining > 0f && Phase != RunPhase.Checkpoint)
+            if (_overloadRemaining > 0f)
             {
                 _overloadRemaining -= h;
                 if (_overloadRemaining <= 0f)
@@ -988,6 +1046,14 @@ namespace BeamRunner.Core.Sim
             if (Phase == RunPhase.Riding)
             {
                 CellType ridden = _grid.Get(_tile, _entryLane, _layer);
+                if (Cells.IsSwitch(ridden))
+                {
+                    // Off the end of the diagonal: exactly in the new lane.
+                    _targetLane = FieldSpec.ClampLane(_entryLane + Cells.LaneDelta(ridden));
+                    ShipX = FieldSpec.LaneX(_targetLane);
+                    ShipVelocityX = 0f;
+                }
+
                 int delta = _entryLane == Lane ? Cells.LayerDelta(ridden) : 0;
                 if (delta != 0)
                 {
@@ -1023,6 +1089,7 @@ namespace BeamRunner.Core.Sim
             _entryLane = Lane;
             _tileEnterTime = Time;
             _gapSince = -1.0;
+            EnterSwitch();
             CheckCellOnEntry();
         }
 
@@ -1058,7 +1125,7 @@ namespace BeamRunner.Core.Sim
         /// <summary>Riding: follow the rail (or a ramp); over a gap, fall once the last-second window is over.</summary>
         private void RideCell(float h)
         {
-            int lane = Lane;
+            int lane = RideLane();
             CellType c = _grid.Get(_tile, lane, _layer);
             float y = FieldSpec.RideY(_layer);
             if (c == CellType.Empty)
@@ -1317,14 +1384,29 @@ namespace BeamRunner.Core.Sim
 
         // ------------------------------------------------------------------ the wall
 
+        /// <summary>
+        /// Perks the walls hand out in turn when the craft needs nothing more urgently (see <see cref="ChoosePerk"/>).
+        /// </summary>
+        private static readonly CheckpointPerk[] PerkRotation =
+        {
+            CheckpointPerk.Shield,
+            CheckpointPerk.BigTank,
+            CheckpointPerk.Efficiency,
+            CheckpointPerk.LongerBoosts,
+        };
+
+        /// <summary>
+        /// The craft meets the wall that ends the level: it turns onto the wall (the bend through the wall tile, see
+        /// <see cref="ClimbSeconds"/>) and rides on up it into the next level, settling onto the middle layer.
+        /// </summary>
         private void StartClimb()
         {
             Phase = RunPhase.Climbing;
             _phaseT = 0f;
             _phaseFromZ = Distance;
             _phaseFromY = ShipY;
-            _phaseToZ = FieldSpec.TileStart(_tile) + FieldSpec.TileLength * 0.5;
-            _phaseToY = WallTopY + 1.2f;
+            _phaseToZ = FieldSpec.TileStart(_tile + 1);
+            _phaseToY = FieldSpec.RideY(FieldSpec.MiddleLayer);
             _queuedLaneShift = 0;
             _graceTimer = 0f;
             Emit(RunEventType.WallReached, 0, _level, 0f, ShipX, ShipY, Distance);
@@ -1332,58 +1414,66 @@ namespace BeamRunner.Core.Sim
 
         private void Climb(float h)
         {
+            // Speed keeps the value it had on the rails (it drives the effects); the bend itself takes ClimbSeconds.
             _phaseT = Math.Min(1f, _phaseT + h / ClimbSeconds);
             float t = _phaseT;
-            float along = 1f - (1f - t) * (1f - t);
-            float rise = MathUtil.SmoothStep(Math.Min(1f, t * 1.25f));
-            double z = _phaseFromZ + (_phaseToZ - _phaseFromZ) * along;
-            Speed = (float)Math.Max(0.0, (z - Distance) / Math.Max(1e-4f, h));
-            Distance = z;
-            SetY(_phaseFromY + (_phaseToY - _phaseFromY) * rise, h);
+            Distance = _phaseT >= 1f ? _phaseToZ : _phaseFromZ + (_phaseToZ - _phaseFromZ) * t;
+            SetY(_phaseFromY + (_phaseToY - _phaseFromY) * MathUtil.SmoothStep(t), h);
             Steer(h);
             if (_phaseT >= 1f)
             {
-                ReachCheckpoint();
+                FinishClimb();
             }
+
+            Activate();
         }
 
-        private void ReachCheckpoint()
+        /// <summary>Over the bend: the level is cleared, the wall's perk applied, and the next level starts.</summary>
+        private void FinishClimb()
         {
-            Phase = RunPhase.Checkpoint;
-            ShipVelocityY = 0f;
-            Speed = 0f;
-            _checkpointWait = 0f;
             int cleared = _level;
             int bonus = (int)(LevelClearPoints * cleared * (1f + _config.ScoreBonus));
             _score += bonus;
             _stats.LevelsCleared++;
             Emit(RunEventType.LevelCleared, 0, cleared, bonus);
-            Emit(RunEventType.CheckpointReached, 0, cleared, 0f, ShipX, ShipY, Distance);
+            ApplyPerk(ChoosePerk());
+
+            Phase = RunPhase.Riding;
+            _tile = FieldSpec.TileOf(Distance);
+            _layer = FieldSpec.MiddleLayer;
+            ShipY = FieldSpec.RideY(_layer);
+            ShipVelocityY = 0f;
+            _entryLane = Lane;
+            _tileEnterTime = Time;
+            _gapSince = -1.0;
+            _level = _course.LevelOfTile(_tile);
+            _stats.LevelReached = Math.Max(_stats.LevelReached, _level);
+            Emit(RunEventType.LevelStarted, 0, _level);
+            if (_config.Tutorial && _level >= _course.StartLevel + 3)
+            {
+                Hint(TutorialHint.Complete);
+            }
         }
 
-        private void Descend(float h)
+        /// <summary>
+        /// The perk a wall gives, picked for the pilot: a hull point when damaged, fuel when the tank is under half,
+        /// otherwise the next of <see cref="PerkRotation"/> (a shield already up is skipped for a bigger tank).
+        /// Deterministic from the run's state, so every pilot of a Daily Run is treated alike.
+        /// </summary>
+        private CheckpointPerk ChoosePerk()
         {
-            _phaseT = Math.Min(1f, _phaseT + h / DescendSeconds);
-            float t = _phaseT;
-            float along = t * t * (3f - 2f * t);
-            double z = _phaseFromZ + (_phaseToZ - _phaseFromZ) * along;
-            Speed = (float)Math.Max(0.0, (z - Distance) / Math.Max(1e-4f, h));
-            Distance = z;
-            SetY(_phaseFromY + (_phaseToY - _phaseFromY) * (t * t), h);
-            Steer(h);
-            if (_phaseT >= 1f)
+            if (Hull < _ship.MaxHull)
             {
-                Phase = RunPhase.Riding;
-                _tile = FieldSpec.TileOf(Distance);
-                _layer = FieldSpec.MiddleLayer;
-                ShipY = FieldSpec.RideY(_layer);
-                ShipVelocityY = 0f;
-                _entryLane = Lane;
-                _tileEnterTime = Time;
-                _gapSince = -1.0;
+                return CheckpointPerk.Patch;
             }
 
-            Activate();
+            if (Fuel < _ship.MaxFuel * 0.5f)
+            {
+                return CheckpointPerk.Refuel;
+            }
+
+            CheckpointPerk p = PerkRotation[(_stats.LevelsCleared - 1) % PerkRotation.Length];
+            return p == CheckpointPerk.Shield && ShieldActive ? CheckpointPerk.BigTank : p;
         }
 
         private void ApplyPerk(CheckpointPerk perk)

@@ -30,8 +30,11 @@ namespace BeamRunner.Game
         private static readonly Pickup[] NoPickups = new Pickup[0];
 
         private Transform _world;
+        private Transform _bend;
         private FxLibrary _fx;
         private SpaceView _space;
+        private SurfaceView _surface;
+        private SignageView _signs;
         private FieldRenderer _field;
         private TrackRenderer _track;
         private CameraRig _rig;
@@ -42,7 +45,9 @@ namespace BeamRunner.Game
         private ZoneTheme _themeFrom;
         private ZoneTheme _themeTo;
         private float _themeT = 1f;
+        private float _themeSeconds = ThemeFadeSeconds;
         private int _themeLevel = -1;
+        private int _nextThemeLevel = -1;
 
         private float _flash;
         private double _hangarDistance;
@@ -59,10 +64,16 @@ namespace BeamRunner.Game
         {
             _world = new GameObject("World").transform;
             _world.SetParent(transform, false);
+
+            // Everything drawn in TrackSpace (the track, its pickups, the structure) turns with the bend up each wall.
+            _bend = new GameObject("Bend").transform;
+            _bend.SetParent(_world, false);
             _fx = FxLibrary.Create(_world);
             _space = SpaceView.Create(_world);
-            _field = FieldRenderer.Create(_world, _fx);
-            _track = TrackRenderer.Create(_world, _fx);
+            _surface = SurfaceView.Create(_bend);
+            _signs = SignageView.Create(_bend);
+            _field = FieldRenderer.Create(_bend, _fx);
+            _track = TrackRenderer.Create(_bend, _fx);
             _rig = CameraRig.Create(_world);
             _post = PostFx.Create(_world);
             _post.Initialize(_rig.Camera);
@@ -153,15 +164,16 @@ namespace BeamRunner.Game
         private void TickSimVisuals(RunSimulation sim, float dt)
         {
             bool crashed = sim.IsCrashed;
-            // The run's world stands still during the 3-2-1 (start, resume, revive) and at a checkpoint: so must the speed
-            // lines and particle drift, which otherwise kept streaming past a frozen track.
-            bool frozen = crashed || sim.AtCheckpoint || (ReferenceEquals(sim, Run) && State == GameState.Countdown);
+            // The run's world stands still during the 3-2-1 (start, resume, revive): so must the speed lines and particle
+            // drift, which otherwise kept streaming past a frozen track.
+            bool frozen = crashed || (ReferenceEquals(sim, Run) && State == GameState.Countdown);
 
-            // 1. globals and environment
+            // 1. globals, the bent track space and the environment
             FieldGlobals.SetScroll(sim.Distance);
             FieldGlobals.SetSpeed01(sim.Speed01);
+            UpdateTrackSpace(sim);
+            _signs.Sync(sim);
             _fx.SetTrackSpeed(frozen ? 0f : sim.Speed);
-            _space.SetEdgeFence(FieldSpec.HalfExtent, false, sim.ShipX, sim.ShipY);
             _space.Tick(dt, frozen ? 0f : sim.Speed, sim.Speed01, sim.OverloadActive);
 
             // 2. craft
@@ -207,8 +219,11 @@ namespace BeamRunner.Game
 
             FieldGlobals.SetScroll(distance);
             FieldGlobals.SetSpeed01(0f);
+            TrackSpace.SetFlat(distance);
+            TrackSpace.ApplyTo(_bend);
+            _surface.Sync(distance, double.NegativeInfinity, double.PositiveInfinity, double.PositiveInfinity);
+            _signs.Sync(null);
             _fx.SetTrackSpeed(speed);
-            _space.SetEdgeFence(FieldSpec.HalfExtent, false, 0f, 0f);
             _space.Tick(dt, speed, 0f, false);
 
             _ship.SetBoost(0f);
@@ -221,6 +236,27 @@ namespace BeamRunner.Game
             _track.Sync(null, false);
             _rig.Tick(dt, 0f, FieldSpec.ShipY, 0f, 0f, 0f, false);
             _post.SetOverdrive(false);
+        }
+
+        /// <summary>
+        /// Frames <see cref="TrackSpace"/> on the level the craft is in (flat from the bend that led into it to its wall,
+        /// where the track turns up into the next level), poses the bend root, the structure and the sky (turned once
+        /// per wall climbed, plus the bend in progress), and hands the shaders the next level's palette and pattern for
+        /// the wall ahead.
+        /// </summary>
+        private void UpdateTrackSpace(RunSimulation sim)
+        {
+            TrackSpace.SetFor(sim);
+            TrackSpace.ApplyTo(_bend);
+            _surface.Sync(sim.Distance, TrackSpace.InEnd, TrackSpace.OutStart, TrackSpace.NextOutStart);
+            FieldGlobals.SetSkyRotation(Quaternion.Euler(TrackSpace.WorldTurn, 0f, 0f));
+            int level = sim.Level;
+            if (_nextThemeLevel != level + 1)
+            {
+                _nextThemeLevel = level + 1;
+                FieldGlobals.SetNextTheme(ZoneThemes.ForLevel(level + 1));
+                FieldGlobals.SetSurfacePatterns(SurfaceView.PatternOf(level), SurfaceView.PatternOf(level + 1));
+            }
         }
 
         private void UpdateShipScreenPoint()
@@ -252,7 +288,12 @@ namespace BeamRunner.Game
             }
         }
 
-        private void BeginThemeFade(int level)
+        /// <summary>
+        /// Cross-fades to level <paramref name="level"/>'s palette over <paramref name="seconds"/>. At a wall it runs over
+        /// the bend (<see cref="RunSimulation.ClimbSeconds"/>), so the palette has become the one the wall already wore when
+        /// that wall turns into the track.
+        /// </summary>
+        private void BeginThemeFade(int level, float seconds = ThemeFadeSeconds)
         {
             if (level == _themeLevel)
             {
@@ -263,6 +304,7 @@ namespace BeamRunner.Game
             _themeTo = ZoneThemes.ForLevel(level);
             _themeLevel = level;
             _themeT = 0f;
+            _themeSeconds = Mathf.Max(0.05f, seconds);
             _field.SetTheme(_themeTo);
         }
 
@@ -273,7 +315,7 @@ namespace BeamRunner.Game
                 return;
             }
 
-            _themeT = Mathf.Min(1f, _themeT + dt / ThemeFadeSeconds);
+            _themeT = Mathf.Min(1f, _themeT + dt / _themeSeconds);
             FieldGlobals.LerpTheme(_themeFrom, _themeTo, MathUtil.SmoothStep(_themeT));
         }
 
@@ -386,9 +428,8 @@ namespace BeamRunner.Game
                     break;
 
                 case RunEventType.PowerUpStarted:
-                    _fx.PowerUpBurst(_ship.Position, FieldGlobals.SecondaryColor);
-                    _post.Pulse(PostFxPulse.NearMiss);
-                    _rig.Kick(3f);
+                    // The pickup already burst where it was collected: just a little kick.
+                    _rig.Kick(1.5f);
                     break;
 
                 case RunEventType.NearMiss:
@@ -400,11 +441,9 @@ namespace BeamRunner.Game
                     break;
 
                 case RunEventType.TrailCompleted:
-                    // A whole gem trail: a burst of the accent colour off the craft and a little kick.
+                    // A whole gem trail: a small burst of the accent colour off the craft and a little kick.
                     _fx.PowerUpBurst(_ship.Position, FieldGlobals.AccentColor);
-                    _ship.PulseHitRing();
-                    _post.Pulse(PostFxPulse.NearMiss);
-                    _rig.Kick(3f);
+                    _rig.Kick(1.5f);
                     Haptics.Light();
                     break;
 
@@ -451,6 +490,7 @@ namespace BeamRunner.Game
                     break;
 
                 case RunEventType.WallReached:
+                    BeginThemeFade(e.Count + 1, RunSimulation.ClimbSeconds);
                     _rig.Kick(5f);
                     _fx.PowerUpBurst(_ship.Position, FieldGlobals.AccentColor);
                     Haptics.Medium();
@@ -507,6 +547,9 @@ namespace BeamRunner.Game
                 case RunEventType.PickupCollected:
                     _field.OnPickupCollected(e.Id);
                     break;
+                case RunEventType.WallReached:
+                    BeginThemeFade(e.Count + 1, RunSimulation.ClimbSeconds);
+                    break;
                 case RunEventType.LevelStarted:
                     BeginThemeFade(e.Count);
                     break;
@@ -521,9 +564,7 @@ namespace BeamRunner.Game
         /// <summary>World position of an impact event (X/Y/Z = track point) on the displayed simulation.</summary>
         private Vector3 ImpactPoint(RunEvent e)
         {
-            RunSimulation sim = DisplayedSim;
-            double distance = sim != null ? sim.Distance : 0.0;
-            return new Vector3(e.X, e.Y, FieldMath.WorldZ(e.Z, distance));
+            return TrackSpace.ToWorld(e.X, e.Y, e.Z);
         }
 
         partial void PresentCountdown(int value)

@@ -2,21 +2,22 @@
 
 ## The look
 
-Open neon space. The craft flies along +Z over a near-black floor carrying a razor-sharp grid: lane lines on the cell
-boundaries (so the field's 9 lanes line up with the gates' cells), bright rails along the field's sides with light pulses
-racing away, cross lines that scroll toward you, a beat ring flying off every other bar, and speed streaks that thicken
-with speed. The far floor melts into the level's fog colour with a horizon glow that the sky continues: a gradient up to a
-deep zenith, a thin horizon band, twinkling stars and a low synthwave sun off to the left (kept away from the vanishing
-point, where far gates would sit on it as dark squares). A dim see-through grid ceiling
-hangs above the field, a faint square frame of light outlines the play area every 20 m (on the floor's major lines), and
-light streaks rush past just outside the field. In levels with deadly edges a hot red **edge fence** (rings halfway
-between the frame's, rails along its four corners) closes in during the level intro, throbs while it is deadly and flares
-as the craft nears it; the white frame dims meanwhile so the edge reads as one line.
+Deep space and a beam of light. The craft rides rails of light along +Z (three lanes on three layers) high over a dark
+beam of the structure (`SurfaceView`, Surface shader): glowing edges, three lane guides under the lanes with light pulses
+racing toward the wall, faint seams in one of three patterns (panels, ribs, diamonds — one per level, cycling) and sparse
+lit windows. At the end of every level the beam and every rail turn up through a quarter pipe and the next level climbs
+straight up the next beam, which rises ahead as a tower of light in the next level's palette and pattern for the whole
+level. Around it, deep space (Sky shader): a haze where the track converges, a faint nebula of the level palette, stars
+and a beacon star — the nebula, stars and beacon turn with the world, so every wall climbed swings the sky round by 90°.
+Light streaks rush past just outside the rails. Once per level a billboard reading BEAMRUNNER in dot lettering (`SignageView`)
+stands just off the track, so the name is in clips of the game. (CubeField's grid floor, ceiling grid, light arches, edge fence and
+synthwave sun are not used.)
 
 Obstacles are dark solids outlined in HDR neon edges: gate walls are 9 × 9 (or wider, for sliding walls) blocks with a
 small gap between neighbouring blocks (the sides of an opening are flush with the true cell boundary, so an opening is
 drawn exactly as wide as it collides), with an additive frame around every opening so the way through reads from far
-away; free cubes tumble, spin and drift. Far obstacles fade toward whatever is behind them (the fogged floor, the sky),
+away; free cubes tumble, spin and drift. Far obstacles fade toward whatever is behind them (the sky colour of their view
+direction),
 so nothing pops in as a silhouette; obstacles the craft has passed dissolve before the chase camera reaches them. Everything follows the level palette (`ZoneThemes.ForLevel`), cross-faded on the GPU. Everything
 is procedural: meshes, textures, materials and particles are built at runtime. Only the shaders are assets
 (`Resources/BeamRunner/Shaders`).
@@ -25,8 +26,9 @@ With URP active, a runtime Volume adds bloom, vignette, chromatic aberration, le
 Tonemapping is **None** to keep the neon saturated; line cores get their white-hot centre in the shader instead. Without
 URP (Built-in), every shader draws its own soft glow around lines and edges, so the neon still reads.
 
-There is **no curved-world bend** (the tunnel game had one): obstacles are drawn exactly where the collision is, because
-the player aims at gate openings from far away.
+**The bend** (`TrackSpace`): the simulation is straight, but everything in track space (rails, cubes, pickups, the
+structure) is drawn through `TrackSpace.Map` under the "Bend" root, which turns about the wall's axis while the craft rides
+a bend; the craft and camera never turn. Straight track is drawn exactly where the collision is.
 
 ## Coordinates
 
@@ -41,7 +43,7 @@ wall blocks stand on it), ceiling at `FieldMath.CeilingY` (3 m above the field).
 
 | Shader | Used for | Key properties |
 |---|---|---|
-| `BeamRunner/Grid` | floor (opaque) and ceiling (additive) | `_GridIntensity`, `_RailIntensity`, `_PulseIntensity`, `_StreakIntensity`, `_BaseAmount` (1 floor / 0 ceiling), `_CellSize`, `_HalfExtent`, `_SrcBlend`/`_DstBlend`/`_ZWrite` |
+| `BeamRunner/Surface` | the beam, its turn up and the wall ahead (opaque; uv = metres across / along the path, colour r = face (0 current, 1 next), g = wall fog) | `_HalfWidth`, `_SeamIntensity`, `_GuideIntensity`, `_EdgeIntensity`, `_WindowIntensity`, `_WallFog`; globals `_FieldNextColor*`, `_FieldSurfacePattern` |
 | `BeamRunner/Sky` | sky sphere (re-centred on the camera in the vertex stage; queue Geometry+450, ZWrite Off: drawn after the opaques so covered pixels are rejected) | `_Radius`, `_StarDensity`, `_StarIntensity`, `_SunIntensity`, `_SunSize` (band / haze strength is the global `_FieldFogParams.w`) |
 | `BeamRunner/NeonSolid` | gate walls, cubes, pickups, procedural ships | `_BaseColor`, `_EdgeColor`, `_RimColor`, `_Palette`, `_EdgeWidth` (m, mesh space), `_EdgeIntensity`, `_BodyGlow`, `_Glow`, `_Flash`, `_StripeAmount`, `_Fade` (`FIELD_DITHER` variant only) |
 | `BeamRunner/Additive` | particles, trail, glows, speed lines, play-area frame, gate-opening highlights | `_MainTex` (+ `_MainTex_ST`), `_TintColor`, `_Palette`, `_Intensity`, `_FogAmount` |
@@ -76,9 +78,13 @@ wall blocks stand on it), ceiling at `FieldMath.CeilingY` (3 m above the field).
 
 ```csharp
 var world = new GameObject("World").transform;            // keep at the origin, unscaled
+var bend   = new GameObject("Bend").transform; bend.SetParent(world, false); // track space (TrackSpace.ApplyTo)
 var fx     = FxLibrary.Create(world);
-var space  = SpaceView.Create(world);                     // floor, ceiling, sky, play-area frame, edge fence, speed lines
-var field  = FieldRenderer.Create(world, fx);             // gates, cubes, pickups (pooled)
+var space  = SpaceView.Create(world);                     // sky, speed lines
+var surface = SurfaceView.Create(bend);                   // the beam, its turn up and the wall ahead
+var signs  = SignageView.Create(bend);                    // the roadside brand sign
+var track  = TrackRenderer.Create(bend, fx);              // rails, ramps, ghost, ceiling, cubes, bends
+var field  = FieldRenderer.Create(bend, fx);              // pickups (pooled)
 var rig    = CameraRig.Create(world);                     // creates the MainCamera + AudioListener
 var post   = PostFx.Create(world); post.Initialize(rig.Camera);   // no-op without URP
 field.SetCamera(rig.Camera);                              // passed obstacles fade out before this camera
@@ -99,13 +105,18 @@ sparks go off around the craft's current position).
 ```csharp
 float dt = Time.deltaTime;
 bool frozen = sim.IsCrashed || countdown;              // the world stands still
-// 1. globals + environment
-FieldGlobals.SetScroll(sim.Distance);                 // also feeds SpaceView's frame
+// 1. globals, track space + environment
+FieldGlobals.SetScroll(sim.Distance);
 FieldGlobals.SetSpeed01(sim.Speed01);
-FieldGlobals.SetBeat(audio.BeatPulse, audio.BeatTime); // grid throbs every beat, ring every BeatRingEvery beats
+FieldGlobals.SetBeat(audio.BeatPulse, audio.BeatTime); // the lane guides throb on the beat
 FieldGlobals.SetFlash(flash01);                       // decay your own flash envelope
+TrackSpace.SetFor(sim);                               // hangar: TrackSpace.SetFlat(distance)
+TrackSpace.ApplyTo(bend);
+surface.Sync(sim.Distance, TrackSpace.InEnd, TrackSpace.OutStart, TrackSpace.NextOutStart);
+signs.Sync(sim);                                      // hangar: signs.Sync(null)
+FieldGlobals.SetSkyRotation(Quaternion.Euler(TrackSpace.WorldTurn, 0f, 0f));
+FieldGlobals.SetNextTheme(ZoneThemes.ForLevel(sim.Level + 1));   // on a level change, with SetSurfacePatterns
 fx.SetTrackSpeed(frozen ? 0f : sim.Speed);
-space.SetEdgeFence(sim.EdgeFence, sim.EdgeFenceArmed, sim.ShipX, sim.ShipY); // hangar: FieldSpec.HalfExtent, false
 space.Tick(dt, frozen ? 0f : sim.Speed, sim.Speed01, sim.OverdriveActive);
 // 2. craft
 ship.SetBoost(sim.OverdriveActive ? 1f : 0f);
@@ -132,7 +143,8 @@ post.Tick(Time.unscaledDeltaTime);
 | `NearMiss` | `fx.NearMissSpark(field.NearMissSparkPoint(e.Id, e.X, e.Y, 0.55f), FieldGlobals.PaletteColor(slot))`, `field.OnNearMiss(e.Id)` (flash), `ship.PulseHitRing()`, `post.Pulse(PostFxPulse.NearMiss)`, `rig.Shake(0.1f)` |
 | `OverdriveStarted` | `post.Pulse(PostFxPulse.Overdrive)`, `rig.Kick(9)`, `fx.PowerUpBurst(ship.Position, FieldGlobals.PrimaryColor)` |
 | `ShieldBroken` | `ship.Flash()`, `post.Pulse(PostFxPulse.Hit)`, `rig.Shake(0.5f)` |
-| `LevelStarted` | cross-fade `FieldGlobals.LerpTheme(prev, ZoneThemes.ForLevel(e.Count), t)` over ~2 s, `field.SetTheme(next)`, `post.Pulse(PostFxPulse.LevelStart)` |
+| `WallReached` | cross-fade `FieldGlobals.LerpTheme(prev, ZoneThemes.ForLevel(e.Count + 1), t)` over the bend (`RunSimulation.ClimbSeconds`), `field.SetTheme(next)` |
+| `LevelStarted` | (the theme already faded at the wall; a run's first level snaps it) `post.Pulse(PostFxPulse.LevelStart)` |
 | `LevelCleared` | `post.Pulse(PostFxPulse.LevelCleared)`, a small world flash (scaled down by reduced flashing) |
 | `Crashed` | `ship.Explode(fx)`, `rig.SetMode(CameraMode.Crash, false)`, `rig.Shake(1)`, `post.Pulse(PostFxPulse.Crash)` |
 | `Revived` | `ship.SetVisible(true)`, `rig.SetMode(CameraMode.Run, false)` |
@@ -142,8 +154,9 @@ post.Tick(Time.unscaledDeltaTime);
 to obstacles removed in the same step, so the FX play exactly once. Near-miss flashes decay on unscaled frame time, so
 they also fade while the run is frozen (crash, revive offer).
 
-Camera modes: `Run` during play (chase camera: follows 85 % of the craft's offset with lag, 7.5 m behind and 1.5 m above,
-looking 27 m ahead and a little toward the field's centre; roll from sideways velocity, small pitch from vertical
+Camera modes: `Run` during play (chase camera: follows half the craft's lane offset with lag, 7 m behind and 1.5 m above
+— halfway to the layer above — looking 26 m ahead, 1.1 m below the craft, and a little toward the field's centre; roll
+from sideways velocity, small pitch from vertical
 velocity, FOV kick with speed / Overdrive; portrait keeps ~45–52° horizontal FOV); `Menu` for the attract loop (slow orbit
 drifting after the autopilot craft); `Hangar` with `ship.SetShowcase(true)` and the craft at (0, 0); `Crash` after a crash.
 Near plane 0.3 m (nothing is drawn closer; it triples the far depth precision of GLES3's 24-bit depth buffer).
@@ -155,13 +168,15 @@ The craft carries a faint ring of exactly the 0.42 m collision radius (facing th
 
 `FieldMath` (world helpers), `ShaderIds`, `FieldShaders`, `FieldMaterials`, `FieldGlobals`, `RenderCache` (runtime-asset
 ownership), `ProceduralTextures`, `MeshBuilder`, `MeshFactory` (+ `.Ships`: `ShipDesignInfo`), `RibbonMesh`, `FxLibrary`,
-`SpeedLines`, `SpaceView`, `TrackRenderer` (rails, ramps, ghost outline, ceiling, obstacles, walls), `FieldRenderer`
-(pickups), `PickupView`, `ShipVisual`, `GhostView`, `CameraRig`, `PostFx`.
+`SpeedLines`, `SpaceView` (sky, speed lines), `TrackSpace` (the bent track space), `SurfaceView` (the beam and the walls),
+`SignageView` (the roadside brand sign),
+`TrackRenderer` (rails, ramps, ghost outline, ceiling, obstacles, bends), `FieldRenderer` (pickups), `PickupView`,
+`ShipVisual`, `GhostView`, `CameraRig`, `PostFx`.
 
 ## Notes and limits
 
 * **Draw calls ≈ visible renderers** (no instancing, no SRP Batcher help: runtime materials + property blocks). Budget:
-  environment 5, each gate wall 2, each cube 1, each pickup 2, craft ~7; passed obstacles stop
+  environment 5, the brand sign 3, each gate wall 2, each cube 1, each pickup 2, craft ~7; passed obstacles stop
   drawing once dissolved. Debris-storm levels can
   show 50+ cubes; `Graphics.RenderMeshInstanced` for cubes is the next step if that proves too many on low-end phones
   (needs instancing pragmas in NeonSolid and "Keep All" instancing variants — see the FIRST_RUN_CHECKLIST).

@@ -73,7 +73,8 @@ namespace BeamRunner.Rendering
         {
             _frame++;
             _clock += Mathf.Min(Time.unscaledDeltaTime, 0.1f);
-            Vector3 camera = _camera != null ? _camera.position : new Vector3(0f, 1.5f, DefaultCameraZ);
+            // The views live in TrackSpace (under the bend root): so must the camera they fade out before.
+            Vector3 camera = _camera != null ? transform.InverseTransformPoint(_camera.position) : new Vector3(0f, 1.5f, DefaultCameraZ);
             if (pickups != null)
             {
                 for (int i = 0; i < pickups.Count; i++)

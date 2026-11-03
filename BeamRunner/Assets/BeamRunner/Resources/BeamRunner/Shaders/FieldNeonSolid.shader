@@ -3,7 +3,7 @@
 // Dark, faintly self-lit body with razor-sharp glowing edges, a fresnel rim and a white-hot hit flash.
 // Opaque, unlit. A fake key light (_FieldLightDir, set by FieldGlobals.SetLightDirection) and a "faces the camera" term
 // shade the body, so tumbling cubes and wall blocks read as solids without real lights. Radial distance fog toward what
-// is behind (FieldFogOpaque: the fogged floor below the horizon, the sky above it), so far obstacles melt into the
+// is behind (FieldFogOpaque: the sky colour of the view direction), so far obstacles melt into the
 // background instead of standing out as dark silhouettes when they spawn deep in the fog.
 //
 // FIELD_DITHER (local multi_compile; FieldMaterials.ObstacleDithered) is the fade-out variant for obstacles the craft
@@ -169,7 +169,7 @@ Shader "BeamRunner/NeonSolid"
                 col += edgeCol * (half)(_FieldFlash * 0.5);
                 col = lerp(col, edgeCol * (half)0.4 + (half)2.5, (half)_Flash);
 
-                col = FieldFogOpaque(col, i.misc.x, -viewDir.y);
+                col = FieldFogOpaque(col, i.misc.x, -viewDir);
                 return half4(col, 1.0);
             }
             ENDCG

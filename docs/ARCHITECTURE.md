@@ -6,14 +6,15 @@ CubeField 3D and Neo Slipstream, and shares their infrastructure, world look, sh
 on **rails of light** — three lanes on each of three layers — and the player swipes left/right to change lane, **taps to
 build a bridge** and **swipes up/down to build a ramp** on the next tile, paying with **fuel** collected along the way.
 Missing a build drops the ship a layer (a hull point); two layers, the void under the bottom layer and the ceiling over
-the top one kill. Each level ends at a **wall checkpoint** (stats and a perk pick). Gems buy **ship upgrades** (fuel
+the top one kill. Each level ends at a **wall**: the track turns up it and the next level climbs it, without stopping (a
+perk is picked for the pilot on the way up). Gems buy **ship upgrades** (fuel
 tank, build efficiency, starting fuel, power-up time, hull) between runs; power-ups (shield, magnet, Overload, instant
 build, repair) and a hidden **adaptive difficulty** rating tune every run. The design doc (`Builder Runner – Design
 Doc.docx` at the repository root) is the product brief.
 
 This document is the contract every module is built against. If you change a contract, update it here. Sections 6–7
 (Unity modules, game flow) are largely inherited from LightLancer / CubeField 3D; the rules (§§4–5), the track
-rendering and the checkpoint are BeamRunner's own (§8).
+rendering, the bent track space and the environment are BeamRunner's own (§8).
 
 ## 1. Principles
 
@@ -64,9 +65,9 @@ rendering and the checkpoint are BeamRunner's own (§8).
 Scripts/
   Core/                     asmdef BeamRunner.Core (pure C#, noEngineReferences)
     Field/                  FieldSpec (lanes, layers, tiles), TrackGrid (cells), Levels/LevelSpec/LevelKind (progression
-                            + speed curve), Course, Pickup/GemTrail, Chunk/ChunkLibrary, RouteSolver, TrackGenerator
+                            + speed curve), Course, Pickup/GemTrail, Chunk/RouteBeats, RouteSolver, TrackGenerator
     Balance/                BalanceConfig (balance.json), ShipStats/UpgradeId, AdaptiveDifficulty/SkillState
-    Sim/                    RunSimulation (phases, building, falls, checkpoint), RunEvent, RunTypes, GhostPath/GhostRecorder
+    Sim/                    RunSimulation (phases, building, falls, the wall), RunEvent, RunTypes, GhostPath/GhostRecorder
     Meta/                   PlayerProfile, Settings, ShipCatalog, Missions, Achievements, Daily, Leaderboard,
                             DailyRuns/DailyRunState (UTC-day Daily Run), ReminderPlanner, ReviewPromptPolicy,
                             PrivacyRegion, ProfileMerge + WalletLedger + CloudSyncPolicy (cloud save),
@@ -115,29 +116,44 @@ builds contain none of it.
   bottom rail (the floor grid is drawn far below, `FieldMath.FloorY` = −16).
 * `TrackGrid` holds a window of `TrackRow`s by tile index (the generator appends ahead, the simulation drops rows
   behind and writes builds into them; `BuiltAt` marks player-built cells for the snap glow).
+* **The bend (rendering only).** The simulation is a straight line, but the track is *drawn* bent (`TrackSpace`): each
+  level lies flat along +Z in its own frame, and its wall tile is a quarter pipe around an axis at `TrackSpace.PivotY`
+  (a metre above the ceiling) after which the next level runs straight up, `PivotY − y` in front of the wall. While the
+  craft rides the bend the whole bent space (track, pickups, structure) turns about that axis — the craft and the camera
+  stay in their usual frame — and the sky turns with it; at the top the next level becomes the frame. Everything drawn in
+  track space goes through `TrackSpace.Map(x, y, s)` under the bend root; world-space things (FX, the ghost) through
+  `TrackSpace.ToWorld`.
 * The craft is a sphere of radius `FieldSpec.ShipRadius` = 0.5 m. It slides to its target lane with a capped speed
   (`MaxLateralSpeed` 26 m/s): a lane switch takes about 0.17 s.
-* **Environment**, **fog** and **near the camera**: unchanged from CubeField 3D (sky sphere, radial fog,
-  `FieldMath.PassedFade`).
+* **Environment**: a dark beam of the structure (`SurfaceView`, 28 m wide, its face at `FieldMath.FloorY` = −36) runs
+  under the rails between two void side walls 28 m high (their rim 3.5 m under the bottom rails) (`WallHeight`: near-black, faint depth bands, a faint rim on
+  top) — a tunnel — turns up at the wall around the same axis, walls and all, and rises ahead as the next level's beam; deep space
+  around it (`SpaceView`: haze at the far end of the track, a nebula, stars and a beacon star that turn with the world).
+  **Fog** is radial and fades everything toward the sky colour of its view direction (`FieldSkyColor(dir)`); the wall
+  ahead is fogged less so it is in view from the start of the level. **Near the camera**: `FieldMath.PassedFade`.
 
 ### Global shader properties (set by `FieldGlobals` in Runtime/Rendering)
 
-Unchanged from CubeField 3D (`_FieldColorA/B/C`, `_FieldBaseColor`, `_FieldFogColor`, `_FieldFogParams`,
-`_FieldLightDir`, `_FieldScroll`, `_FieldScrollDelta`, `_FieldBeat`, `_FieldBeatRing`, `_FieldSpeed01`, `_FieldFlash`;
-keyword `FIELD_LITE`, material keyword `FIELD_DITHER`). Rails take the level palette by layer: bottom = secondary (B),
-middle = primary (A), top = accent (C).
+From CubeField 3D: `_FieldColorA/B/C`, `_FieldBaseColor`, `_FieldFogColor`, `_FieldFogParams`, `_FieldLightDir`,
+`_FieldScroll`, `_FieldScrollDelta`, `_FieldBeat`, `_FieldBeatRing`, `_FieldSpeed01`, `_FieldFlash`; keyword `FIELD_LITE`,
+material keyword `FIELD_DITHER`. BeamRunner's: `_FieldSkyRotation` (world → sky, `SetSkyRotation`),
+`_FieldNextColorA/B/C`, `_FieldNextBaseColor` (the next level's palette, worn by the wall ahead, `SetNextTheme`),
+`_FieldSurfacePattern` (x = the face under the track, y = the wall ahead; `SetSurfacePatterns`). Rails take the level
+palette by layer: bottom = secondary (B), middle = primary (A), top = accent (C).
 
 ## 5. Core simulation (`BeamRunner.Core`)
 
 ### Levels (`Field/Levels.cs`, the one file to edit for pacing)
 
 A run is a sequence of levels on the course; `Course(startLevel)` maps a run's distance and tiles onto it (start level
-picker as in CubeField). Levels last 44 tiles (level 1), 52 (2–4), 60 (5–12) and 68 (13+), each opening with
-`IntroTiles` (4; 6 on a run's first level) of plain track and closing with `RunwayTiles` (2) and the **wall**. The
-planned speed rises linearly (in distance) from 14 m/s at level 1 to 26 m/s at level 13 and stays there; the adaptive
-multiplier scales it. Each level has a kind (its banner name and which chunk tags it favours), a chunk tier cap, a
-chunk gap (plain tiles between chunks), whether the top layer is open (from level 2) and whether obstacles appear (from
-level 5, `Levels.ObstacleLevel`):
+picker as in CubeField). Levels last 36 tiles (level 1), 44 (2–4), 52 (5–12) and 60 (13+) — a wall every 15–20 s —
+each opening with `IntroTiles` (4; 6 on a run's first level) of plain track and closing with `RunwayTiles` (2) and the
+**wall**. The planned speed rises linearly (in distance) from 19.8 m/s at level 1 to 30 m/s at level 13 and stays there;
+the adaptive multiplier scales it. Each level has a kind (its banner name and which chunk tags it favours — its
+signature tag dominates the weights, so consecutive levels play differently), a chunk tier cap, a chunk gap (plain
+tiles between chunks), whether the top layer is open (from level 2) and whether obstacles appear (from level 5,
+`Levels.ObstacleLevel`). Each level also looks different: its own palette (`ZoneThemes`) and one of three surface
+patterns (`SurfaceView.PatternOf`), both already worn by its wall while the level before is ridden:
 
 | Level | Kind | Teaches | Tier cap |
 |---|---|---|---|
@@ -149,41 +165,55 @@ level 5, `Levels.ObstacleLevel`):
 | 8–12 | Gauntlet, Blockade, Switchback, Skyline, Overload | everything | 3 |
 | 13+ | plateau cycle: Gauntlet, Blockade, Switchback, Skyline, Overload | | 3 |
 
-### Chunks and generation (`Field/Chunk.cs`, `Field/ChunkLibrary.cs`, `Field/TrackGenerator.cs`, `Field/RouteSolver.cs`)
+### The route and generation (`Field/Chunk.cs`, `Field/RouteBeats.cs`, `Field/TrackGenerator.cs`, `Field/RouteSolver.cs`)
 
-* **Chunks** are hand-built stretches written as text: rows (tiles) separated by commas, each an optional repeat count
-  and three groups of three cells — bottom, middle, top layer, lanes left to right — e.g. `"=== =.= ..."`. Cells: `.`
-  gap, `=` rail, `^`/`v` ramp up/down, `#` obstacle, `o` optional obstacle (rolled by the adaptive obstacle amount), `g`
-  rail + gems, `*` gap + gems (reached only by building), `f`/`F` rail/gap + fuel, `s` shield, `r` repair, `p` a power-up
-  when one is due (gems otherwise). Each has a tag (Bridge, Ramp, Edge, Obstacle, Gems, Fuel) and a tier (0–3); tier-0
-  chunks never use the top layer. `ChunkLibrary.All` holds them; add chunks there.
+* **A route and its branches.** A level is not the open 3 × 3 grid: it is one guaranteed route (a lane on a layer) with
+  **branch rails** beside it (`TrackGenerator.OverlayBranch`: a lane over or a layer up/down, 5–14 tiles, an occasional
+  gap, lane drift or ramp, often gems; 12 % of tiles start one in level 1, 30 % later) — never more than three rails at
+  a tile, about 1.5 on average. A swipe builds a diagonal into the next lane, so a branch beside the craft is always
+  reachable.
+  Only the intro (all three lanes of the middle layer: the craft comes over the wall in any lane) and the runway (all
+  three lanes of the route's layer) are wider.
+* **Beats** (`RouteBeats`, built procedurally for the route's position, `TagOf` / `TierOf`): tier 0 — `Gap` (bridge 1
+  tile; in levels 1–2 and the tutorial always, later 60 → 15 % of the time, a **net** one layer down catches a miss and
+  ramps back up), `Shift` (the rail moves a lane; two tiles of overlap at tier 0, one later), `Fuel`, `Gems`; tier 1 —
+  `ShiftGap`, `RampUp` (the rail goes on a layer up: build a ramp), `Drop` (it goes on a layer down: ramp down for 1 fuel
+  or fall for a hull point), `RideRamp`, `Fork` (a side rail with a gap to bridge for gems or fuel), `SkyRun` (top layer
+  under the ceiling), `VoidWalk` (bottom layer over the void); tier 2 — `Weave` (two shifts), `Dodge` (a cube on the
+  route, a lane beside it); tier 3 — `Combo` (2–3 build/shift beats back to back). Every beat starts and ends with a
+  plain tile of route rail. Beats are `Chunk`s (rows of cell codes, never mirrored): `.` gap, `=` rail, `^`/`v` ramp
+  up/down, `#` obstacle, `o` optional obstacle, `g` rail + gems, `f` rail + fuel, `s` shield, `r` repair, `p` a
+  power-up when one is due (gems otherwise). **Pickups only ride on rails, in clear sight**: never over a gap (where they
+  read as track that isn't there), and never on a tile the track doesn't go on from — flat or rising — for
+  `TrackGenerator.SightTiles` (2) tiles in that lane, so no gem, fuel cell or power-up stands in front of a gap, a drop, a
+  ramp down or a cube and hides it. Rows' pickups are decided once those tiles exist (`Want` → `Finalize`); the solver
+  frontier is carried over a row only then, with its real fuel, and a beat's check counts only fuel it is sure to keep.
 * **Route solver**: a dynamic program over tiles whose state is (lane, layer, what was built on that cell) and whose
-  value is the most fuel a pilot can hold there (−1 = unreachable). Moves follow the rules conservatively (one lane per
-  tile, only between flat rails; builds cost fuel and fill the next tile; gaps, obstacles, the ceiling and the void end a
-  route — a fair route never needs a fall).
-* **Stitching** (`TrackGenerator`): every level = intro, then chunks picked by the level's tag weights × (1 + 0.4 × tier)
-  among those within its tier cap (never the same chunk twice running, mirrored half of the time) separated by plain
-  track on every open layer (`ChunkGap` ÷ the adaptive gap amount, plus 0–1), then the runway and the wall. The
-  generator carries the solver frontier along and **places a chunk only if some route survives it** (the design's
-  "fuel provided before a chunk covers the fuel it needs"); below `LowFuel` (6) fuel chunks are strongly favoured, and
-  if nothing fits, plain track (which can carry fuel) is laid instead.
+  value is the most fuel a pilot can hold there (−1 = unreachable). Every move is a build on the next tile — a bridge,
+  a ramp up or down, or a diagonal into the next lane (free over rail, a bridge's price over a gap, never beside a cube)
+  — or riding what is there; gaps, obstacles, the ceiling and the void end a route — a fair route never needs a fall.
+* **Stringing** (`TrackGenerator`): every level = intro, then beats picked by the level's tag weights × (1 + 0.4 × tier)
+  among those within its tier cap (never the same build beat twice running) joined by 0–1 extra tiles of route rail
+  (`ChunkGap` − 1 ÷ the adaptive gap amount), then the runway and the wall. The generator carries the solver frontier
+  along and **places a beat only if the route survives it to the beat's exit rail** (the design's "fuel provided before
+  a chunk covers the fuel it needs"); below `LowFuel` (6) fuel beats are strongly favoured, and if nothing fits, route
+  rail (which can carry fuel) is laid instead.
 * **Pickups**: gems are worth `BalanceConfig.GemValue(level)` × the adaptive gem multiplier (stochastic rounding), two
   per gem cell; consecutive gem cells in a lane (across layers) of ≥ 4 gems form a `GemTrail` (all collected = full-line
   bonus). Fuel cells are kept with probability level `FuelScale` × adaptive fuel; plain track carries a fuel cell with
-  `FillerFuelChance` and short gem lines (richest on the highest open layer). Power-ups keep their own schedule (every
+  `FillerFuelChance` or a gem cell. Power-ups keep their own schedule (every
   `PowerUpIntervalMin–Max` planned seconds ÷ the adaptive drops amount; weights shield 26, magnet 20, Overload 18,
-  instant build 22, repair 8; no Overload before level 2, no repair before level 3), placed in a chunk's `p` slot or on
-  plain track's highest open layer.
+  instant build 22, repair 8; no Overload before level 2, no repair before level 3), placed on the route rail.
 * Deterministic from the seed (separate streams for layout, items and power-ups). The Daily Run fingerprint is pinned
   in `DailyRunTests` — bump `DailyRuns.GeneratorVersion` when generated tracks change.
 
 ### Riding, building and falling (`Sim/RunSimulation.cs`)
 
-* `Step(dt, RunInput)` sub-steps at ≤ 1/120 s. `RunInput`: `LaneShift` (±1 per swipe/press), `Build`
-  (`BuildKind.Bridge` / `RampUp` / `RampDown`), `UseAbsoluteLane` + `AbsoluteLane` (bots).
-* **Phases**: `Riding` (on a rail, or hovering in Overload), `Falling`, `Climbing` (up the wall), `Checkpoint` (waiting
-  for `ContinueFromCheckpoint(perk)`; `RunConfig.AutoCheckpoint` continues after 0.5 s), `Descending` (onto the next
-  level's middle layer).
+* `Step(dt, RunInput)` sub-steps at ≤ 1/120 s. `RunInput`: `LaneShift` (±1 per swipe/press: a switch build on the rails,
+  steering in a fall), `Build` (`BuildKind.Bridge` / `RampUp` / `RampDown` / `SwitchLeft` / `SwitchRight`),
+  `UseAbsoluteLane` + `AbsoluteLane` (tests; on the rails it builds the switch toward that lane).
+* **Phases**: `Riding` (on a rail, or hovering in Overload), `Falling`, `Climbing` (the bend up the wall into the next
+  level).
 * **Builds** fill the **next tile** in the craft's target lane at the layer it will be on there (a ramp it is riding
   counts), always — whether or not there is a gap — and cost `BridgeCost` 2 / `RampUpCost` 3 / `RampDownCost` 1 fuel
   (× build efficiency, × 0 during instant build). Too little fuel: `BuildFailed` (red flash + "empty" sound), nothing
@@ -191,8 +221,12 @@ level 5, `Levels.ObstacleLevel`):
   craft rides onto a gap, a build fills that tile instead (a last-second build). Building into an obstacle crashes
   (Overload / a shield break it instead); a ramp up on the top layer crashes into the ceiling when ridden (a shield turns
   it into flat rail); a ramp down on the bottom layer leads into the void.
-* **Lanes** switch freely on flat rail and in the air; on a ramp (or toward a ramp beside the craft) the switch waits up
-  to 0.6 s for the next tile.
+* **Lanes** change by building: a swipe left/right on the rails builds a **switch** (`CellType.SwitchLeft/Right`,
+  `BuildKind.SwitchLeft/Right`) on the next tile — the same one-tile piece a tap builds, only it curves into the
+  adjacent lane over the tile (the craft follows the S; `Cells.LaneDelta`), so the ship is always on light and new paths
+  are built between beams rather than jumped. Free where it replaces rail; over a gap it is a bridge too (bridge price,
+  bridge stats, `Built`); into a cube it crashes like any build. One switch a tile (a second swipe before the craft
+  reaches it does nothing); on the field's side, nothing. In the air (falling) swipes still steer toward a lane to land.
 * **Falls**: over a gap (after the late-build window) the craft falls under `Gravity` (38 m/s², ~0.4 s a layer). Landing
   on a rail of the layer below costs a hull point (a shield absorbs it; hull 0 = `CrashCause.HullBroken`); passing that
   layer without a rail is death (`LongFall`, or `Void` from the bottom layer). Overload and its `OverloadGrace` (0.8 s)
@@ -207,16 +241,17 @@ level 5, `Levels.ObstacleLevel`):
 * **Power-ups**: shield (until used), magnet (pulls gems and fuel from every lane and the neighbouring layers),
   Overload (×1.35 speed, smashes obstacles, flies over gaps), instant build (free builds), repair (full hull); durations
   × the Power-up time upgrade and the Long Boosts perk.
-* **The wall**: entering the wall row starts the climb (0.9 s up the face), then `LevelCleared` + `CheckpointReached`;
-  `ContinueFromCheckpoint(perk)` applies a `CheckpointPerk` (Refuel, Patch, Shield, Efficiency −15 %, Big Tank +5,
-  Longer Boosts +25 %) and drops the craft onto the next level's middle layer; `GrantPerk` adds extra perks while
-  waiting (the rewarded "take all three").
+* **The wall**: entering the wall row (any lane or layer) starts the climb: `WallReached`, then the craft rides the wall
+  tile in `ClimbSeconds` (0.5 s, never stopping; `Speed` keeps its value for the effects), drifting onto the middle
+  layer; no builds meanwhile. At the top: `LevelCleared` (250 × level), `PerkApplied` — a `CheckpointPerk` picked for the
+  pilot (Patch when the hull is damaged, Refuel under half a tank, otherwise in turn Shield (Big Tank if one is up), Big
+  Tank +5, Efficiency −15 %, Longer Boosts +25 %) — and `LevelStarted` on the next level's first tile, middle layer.
 * **Revive** puts the craft back on a rail (the middle layer after a fall), lays track on its lane for the next tiles,
   clears obstacles on its layer there, restores the hull and at least half the starting fuel.
 * `RunAutopilot.FollowLine` plays by the public state (once per tile it picks the lane and build that keep a solver
   route alive with the most fuel, with a pull toward gems and fuel); `SeekCrash` builds ramps down into the void.
 * Events add `Built`, `BuildFailed`, `FellOff`, `Landed`, `Damaged`, `Repaired`, `LayerChanged`, `FuelLow`,
-  `WallReached`, `CheckpointReached`, `PerkApplied`, `OverloadStarted/Ended` to CubeField's set. `RunResult` adds
+  `WallReached`, `PerkApplied`, `OverloadStarted/Ended` to CubeField's set. `RunResult` adds
   `Builds`, `Bridges`, `RampsUp`, `RampsDown`, `GapsBridged`, `FuelCollected/Spent/Wasted`, `EmptyBuilds`, `Falls`,
   `DamageTaken`, `Repairs`, `Overloads`, `TopLayerSeconds`, `Cause`.
 
@@ -224,7 +259,7 @@ level 5, `Levels.ObstacleLevel`):
 
 * `BalanceConfig` holds every tunable number; `Resources/BeamRunner/Config/balance.json` overrides any field at boot
   (`BalanceLoader`; missing fields keep the defaults, broken values are repaired by `Sanitized`). Design starting
-  values: fuel costs 3/2/1, start fuel 10, max fuel 20, fuel cell 3, hull 3 (cap 5).
+  values: fuel costs 3/2/1, start fuel 12 (raised from the design's 10), max fuel 24, fuel cell 3, hull 3 (cap 5).
 * `ShipStats.FromLevels(levels)`: max fuel +2 per Fuel tank level, build cost −4 % per Efficiency level, start fuel +1 per
   Starting fuel level, power-up time +8 % per Duration level, +1 hull per Hull level. Max levels 10/10/10/10/2; prices
   C0 × 1.2^n (C0 60, 90, 50, 70, 900); Duration unlocks at best level 2, Hull at 4.
@@ -289,11 +324,11 @@ mind — a pack buys price, never a requirement.
 * `FieldMath` — `WorldZ(trackZ, shipDistance)` (double subtraction), `CellCenter`, `CellPosition`, `Point`, `WarmUp`,
   `PassedFade(rearZ, frontZ, cameraZ)` (1 → 0 once the craft is through, 0 before the camera arrives); constants
   `HalfExtent`, `CellSize`, `VisibleLength` (190), `FloorY`, `CeilingY`, `DitherNearCamera`.
-* `FieldShaders` — finds shaders by name (`"BeamRunner/Grid"`, `"BeamRunner/Sky"`, `"BeamRunner/NeonSolid"`,
+* `FieldShaders` — finds shaders by name (`"BeamRunner/Surface"`, `"BeamRunner/Sky"`, `"BeamRunner/NeonSolid"`,
   `"BeamRunner/Additive"`, `"BeamRunner/Hologram"`), falls back to built-ins, never null; `IsFallback(name)`. The
   transparent shaders fall back only to `Sprites/Default`; `CanDraw(name)` is false when no fallback would draw them
   correctly (never an opaque shader in place of an additive one).
-* `FieldMaterials` — factory + cache: `Floor()`, `Ceiling()`, `Sky(radius)`, `Obstacle()` (palette-driven) /
+* `FieldMaterials` — factory + cache: `Surface()`, `Sky(radius)`, `Obstacle()` (palette-driven) /
   `ObstacleDithered()` (the `FIELD_DITHER` fade-out variant) / `Obstacle(ColorRGB/Color edge, float glow)`,
   `Additive(Texture)`, `Glow()`, `Beam()`, `Ship(Color body, Color glow)`, `Hologram(Color[, CullMode])`, `Gem()`;
   `GuardAdditive(renderer)` / `GuardHologram(renderer)` (`forceRenderingOff` when the shader cannot be drawn).
@@ -308,13 +343,23 @@ mind — a pack buys price, never a requirement.
 * `ProceduralTextures` — `SoftDot`, `Streak`, `Ring`, `Sparkle`, `Noise`, `Beam`, `Trail` (cached `Texture2D`).
 * `FxLibrary` — pooled emit-only particle systems: `Explosion`, `Sparkle`, `SmashBurst`, `PowerUpBurst`, `NearMissSpark`,
   `SetTrackSpeed` (particles drift toward −Z with the world), `SetReducedFlashing`, `Clear`.
-* `SpaceView` — the environment: neon grid floor (lanes on the cell boundaries), dim see-through grid ceiling, procedural
-  sky (gradient, horizon band, stars, sun), a faint play-area frame every 20 m plus top-corner rails, `SpeedLines` in a box
-  volume just outside the field. `Create(parent)`, `Tick(dt, speed, speed01, overdrive)`, `SetVisible(bool)`,
-  `SetQuality(0..2)` (tier 0: fewer streaks, no ceiling).
-* `TrackRenderer` — the rail grid, ghost outline, gap warning, ceiling, obstacle cubes and level walls (see §8):
-  `Create(parent, fx)`, `Sync(sim, showGhost)` (`null` hides the track), `OnBuilt(world, layer)`, `OnSmashed(world, layer)`,
-  `Clear()`; static `LayerSlot` / `LayerColor`.
+* `TrackSpace` (static) — the bent space the track is drawn in (§4): `SetFor(sim)` / `Set(distance, inEnd, outStart)` /
+  `SetFlat(distance)` once per frame, `ApplyTo(bendRoot)`, `Map(x, y, s)`, `Tilt(s)`, `ToWorld(...)`, `BendAngle` /
+  `Bend01`, `WorldTurn` (the sky's turn), `InEnd` / `OutStart` / `NextOutStart`.
+* `SpaceView` — world-space environment: the procedural sky (haze at the far end of the track; nebula, stars and a
+  beacon turning with `_FieldSkyRotation`; radius `SkyRadius` 900 m, inside the 1000 m far plane) and `SpeedLines` in a
+  box volume just outside the rails. `Create(parent)`, `Tick(dt, speed, speed01, overdrive)`, `SetVisible(bool)`,
+  `SetQuality(0..2)` (tier 0: fewer streaks; the sky drops a nebula octave under `FIELD_LITE`).
+* `SurfaceView` — the structure in track space: the beam under the rails, its turn up at the wall and the next level's
+  beam rising ahead, up to that level's own turn (one mesh rebuilt per level). `Create(bendRoot)`,
+  `Sync(distance, inEnd, outStart, nextOutStart)`, `SetVisible`, static `PatternOf(level)`.
+* `SignageView` — the roadside brand sign (ported from LightLancer): a dark neon-edged board reading "BEAMRUNNER" in
+  glowing dot lettering (its own 5 × 7 pixel font, generated texture) on two posts, beside the track and turned 22°
+  toward it; placed in track space at Core's `Signs` position of the craft's level or the next (one pooled sign, three
+  draw calls in view): `Create(bendRoot)`, `Sync(sim)` after `TrackSpace` is set (`null` hides it: hangar).
+* `TrackRenderer` — the rail grid, ghost outline, gap warning, ceiling, obstacle cubes and each level's bend up its wall,
+  all in track space (see §8): `Create(parent, fx)`, `Sync(sim, showGhost)` (`null` hides the track), `OnBuilt(world, layer)`,
+  `OnSmashed(world, layer)`, `Clear()`; static `LayerSlot` / `LayerColor`.
 * `FieldRenderer` — binds the simulation.s pickups to pooled views by id diff (zero steady-state allocation):
   `Create(parent, fx)`, `SetCamera(camera)` (drives the fade-out of passed pickups), `Sync(pickups, shipDistance)`,
   `OnPickupCollected(pickupId)` (idempotent), `Clear()`, `SetTheme(theme)`, `ActivePickupCount` / `CreatedViewCount`.
@@ -327,8 +372,10 @@ mind — a pack buys price, never a requirement.
   `SetOverdrive(bool)`, `SetReducedFlashing(bool)`, `ResetPulses()`; no-op if URP is absent.
 * `CameraRig` — owns the main camera. `Tick(dt, shipX, shipY, velX, velY, speed01, overdrive)`; `SetMode(Run | Menu |
   Hangar | Crash, instant)`, `Shake(amount)`, `Kick(fovDelta)` (accumulated punch capped at `MaxKick` = 12°); near
-  plane `NearClip` = 0.3 m. Run: chase camera following half the craft.s lane offset
-  and its height (with more lag on height), 6.6–7.2 m behind and 2.2–2.6 m above (never above the ceiling), looking 26 m ahead and a little toward the field's centre, up = +Y, roll
+  plane `NearClip` = 0.3 m, far plane 1000 m. Run: chase camera following half the craft.s lane offset
+  and its height (with more lag on height), `RunBack` 7–7.6 m behind and `RunHeight` 1.5 m above — halfway to the
+  layer above, so that layer's rails stay overhead instead of crossing the view (never above the ceiling) — looking
+  26 m ahead, `RunLookDrop` 1.1 m below the craft and a little toward the field's centre, up = +Y, roll
   from sideways velocity, small pitch from vertical velocity, FOV kick with speed / Overdrive; portrait keeps ~45–52°
   horizontal FOV. Menu: slow orbit drifting after the attract-run craft. Hangar: three-quarter showcase. Crash: hold,
   then pull back and up.
@@ -399,8 +446,8 @@ mind — a pack buys price, never a requirement.
 ## 7. Game flow
 
 `Boot → (Consent dialog, first launch only) → Menu ⇄ Hangar/Missions/Stats/Settings → Countdown →
-Running ⇄ Paused, Running → Checkpoint (level wall: stats + perk pick) → Running, Running → Crashed →
-(Revive → Running) → GameOver → Menu | Retry`.
+Running ⇄ Paused, Running → Crashed → (Revive → Running) → GameOver → Menu | Retry`. Level walls never leave Running:
+the craft rides up them into the next level.
 
 Start level: once a pilot has reached a later level, ◀ ▶ beside PLAY pick the level normal runs start at
 (`ProfileService.StartLevel`, clamped to `MaxStartLevel` = best level reached; every level in the Editor and development
@@ -412,7 +459,7 @@ After the first daily-reward claim the menu offers daily reminders once (the OS 
 
 Boot: frame 1 = profile/services, start of the audio worker, UI root + splash only; frame 2 = the world
 (space environment, track and pickup renderers, camera, post-FX, ship); then services and the attract run (the menu
-background: an invincible autopilot riding a random level 1–12 with checkpoints that pass on their own, restarted
+background: an invincible autopilot riding a random level 1–12 and up its walls, restarted
 every 1.5 km). The other screens are built behind the splash while the audio renders (menu first), and icons are
 painted on a worker thread.
 
@@ -423,28 +470,45 @@ at most every 3rd game over, ≥ 120 s apart, never if "Remove Ads" owned).
 
 * **Track rendering**: `TrackRenderer` draws every rail (a flat ribbon plus a vertical fin), ramp, tile tick, the
   ceiling's hazard line and stripes, the **ghost outline** on the build target (pulsing on a gap, dim on rail, red when
-  even a ramp down is unaffordable) and the orange **gap warning** within the adaptive lead time, in one dynamic additive
-  mesh; built pieces grow over `SnapSeconds` (0.2 s) with a white-hot glow. Obstacle cubes and level walls are pooled
-  `Obstacle`-material renderers. The layer the craft rides is brightest, the layer below it dimmest. `FieldRenderer`
-  binds pickups only (gem, fuel cell, shield, magnet, Overload bolt, repair cross, instant-build chevron);
+  even a ramp down is unaffordable), the orange **gap warning** within the adaptive lead time and each wall tile's
+  **bend** (every rail curving up, a bright bar where the turn starts), in one dynamic additive mesh in `TrackSpace`
+  (pieces on a bend are split in 8; switches curve over their tile in 6); built pieces grow over `SnapSeconds` (0.2 s)
+  with a white-hot glow; bright caps mark where a rail ends or starts; a **ramp** wears the colour of the layer it leads
+  to and carries chevrons on both sides pointing up or down (`RampArrows`, lit in turn in the direction of travel); tile ticks only on the craft's layer; the ceiling's
+  diagonal stripes only from the top layer. Obstacle cubes are pooled `Obstacle`-material renderers. The layer the craft
+  rides is brightest, the others at 60–65 %; the layer above (and the ceiling) dims to 45 % overhead and is full from
+  18 m ahead. The next level's rows up the wall wear its palette. `FieldRenderer` binds pickups only
+  (gem, fuel cell, shield, magnet, Overload bolt, repair cross, instant-build chevron), placed in `TrackSpace`;
   `CameraRig` follows the craft's height with more lag than its lane (a drop reads as a fall) and never rises above the
   ceiling; `ShipVisual.GroundY` puts the glow pool on the rail under the craft.
-* **Input** (`InputRouter`): `ControlMode.Swipe` (default): swipe left/right = lane, swipe up/down = ramp, tap (a touch
-  that barely moved, ≤ 0.3 s) = bridge; every finger is its own gesture. `ControlMode.TapSides`: taps on the outer thirds
+* **Environment** (`SurfaceView`, `SpaceView`, Surface and Sky shaders): BeamRunner's own look (CubeField's grid floor,
+  ceiling grid, light arches and synthwave sun are gone): rails over a dark beam with glowing edges, lane guides with
+  light pulses racing toward the wall, faint seams (panels, ribs or diamonds by level) and sparse lit windows; the next
+  level's beam rises ahead in its own palette and pattern; deep space around with a haze where the track converges. The
+  theme cross-fades to the next level's over the bend (`ClimbSeconds`), so it matches the wall as the wall becomes the
+  track.
+* **Input** (`InputRouter`): `ControlMode.Swipe` (default): swipe left/right = a diagonal into the next lane on the next tile, swipe up/down = ramp, tap (a touch
+  that barely moved, ≤ 0.3 s) = bridge; a swipe travels 10 % of the screen width (÷ the sensitivity setting) and does
+  exactly one thing however far the finger slides; every finger is its own gesture. `ControlMode.TapSides`: taps on the outer thirds
   move a lane, the middle bridges. Keyboard A/D ←/→ lanes, W/↑ S/↓ ramps, Space bridge; gamepad d-pad/stick and south
   button. *Invert up / down* swaps the ramps.
-* **HUD**: fuel gauge (value, low-fuel and free-build states, red shake on an empty build), hull hearts, chips for
+* **HUD**: the **layer gauge** at the left edge (`HudScreen.Layers.cs`: three bars in the layers' rail colours, the
+  craft's lit; a red ceiling line that throbs on the top layer; the layer below blinks in a fall), fuel gauge (value,
+  low-fuel and free-build states, red shake on an empty build), hull hearts, chips for
   shield / magnet / Overload / instant build, "NO FUEL", "HULL HIT" and fuel popups, the level banner and coaching hints
   (bridge, ramps, fuel, edges, obstacles).
-* **Checkpoint** (`GameState.Checkpoint`, `GameController.Checkpoint.cs`, `CheckpointScreen`): three perks rolled
-  from the pool (skipping ones that would do nothing); one pick continues; a rewarded ad takes all three. Back picks the
-  first.
+* **Level walls** never stop the run: the perk is picked by the simulation (above) and named in a HUD popup under the
+  level-clear bonus (`HudScreen.Fx`, `PerkApplied`). The old checkpoint screen and its rewarded "take all three" are
+  gone.
 * **Upgrade shop**: `UpgradesScreen` (menu tile UPGRADES with an "affordable" badge, and from the results screen), daily
   free level via rewarded ad (`GameController.FreeUpgradeWithAd`). The results screen shows the next-upgrade bar.
 * **Audio**: no new synthesis; builds play a pitched `ShotPing` + `BlockHit` "snap", empty builds `UiError`, falls and
   damage `ShotPing`/`BlockBreak` low, the wall `OverdriveReady` (see `GameController.Audio.cs`).
 * **Background (footage) mode**: build with the scripting define `BEAMRUNNER_FOOTAGE` (`FootageMode.Enabled`): runs are
-  ridden by the autopilot, never crash, checkpoints pass on their own, and the HUD shows only a "BEAMRUNNER" watermark.
+  ridden by the autopilot, never crash, and the HUD shows only a "BEAMRUNNER" watermark.
+* **Roadside brand sign** (`Core/Field/Signs.cs`, `SignageView`): scenery the craft passes once per level (96 m after
+  its start, alternating sides) in every run, the attract run and footage builds, so clips show the name inside the
+  world rather than as a croppable overlay. Outside the lanes; never collides.
   Never ship a store build with it.
 * **Not built yet** (after the MVP per the design doc): the emergency-fuel rewarded ad, the Scanner upgrade, a visible
   "Heat" meter, the "quit right after a death" rage signal, ring-segment obstacles, BeamRunner store feature graphics

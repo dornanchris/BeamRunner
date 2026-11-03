@@ -79,7 +79,6 @@ namespace BeamRunner.Core.Tests
                 Seed = DailyRuns.SeedForDay(day),
                 MaxRevives = 0,
                 Invincible = true,
-                AutoCheckpoint = true,
             });
             var rec = new GhostRecorder(sim.Config.Seed, DailyRuns.GeneratorVersion);
             var frames = new List<Frame>();

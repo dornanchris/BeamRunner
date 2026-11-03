@@ -7,35 +7,102 @@ using NUnit.Framework;
 namespace BeamRunner.Core.Tests
 {
     /// <summary>
-    /// The chunk library and the generator that stitches it: every chunk parses and can be cleared without a fall on the
-    /// starting fuel (checked with the <see cref="RouteSolver"/>, mirrored and not), and the generated track keeps the
-    /// contract the simulation relies on (one wall per level, deterministic output, a route always alive).
+    /// The route beats and the generator that strings them into one forced route: every beat starts and ends on the
+    /// route rail, can be cleared without a fall on the starting fuel (checked with the <see cref="RouteSolver"/>), and
+    /// the generated track keeps the contract the simulation relies on (one wall per level, deterministic output, a route
+    /// always alive), is a few rails (the route and its branches, never the open grid) and never puts a pickup over a gap.
     /// </summary>
     public class ChunkTests
     {
-        /// <summary>Plain track modelled before and after a chunk (the generator puts filler between chunks).</summary>
+        /// <summary>Route rail modelled before and after a beat (the generator joins beats with route rail).</summary>
         private const int PlainTiles = 2;
 
         [Test]
-        public void EveryChunk_Parses_WithUniqueId_AndAtLeastThreeRows()
+        public void EveryBeat_FromEveryStart_StartsAndEndsOnTheRoute_WithValidCells()
         {
-            IReadOnlyList<Chunk> all = null;
-            Assert.DoesNotThrow(() => all = ChunkLibrary.All, "every chunk string parses");
-            Assert.That(all.Count, Is.GreaterThan(0));
-            var ids = new HashSet<string>();
-            foreach (Chunk chunk in all)
+            int built = 0;
+            foreach (BeatKind kind in RouteBeats.All)
             {
-                Assert.IsFalse(string.IsNullOrEmpty(chunk.Id));
-                Assert.IsTrue(ids.Add(chunk.Id), "duplicate chunk id " + chunk.Id);
-                Assert.That(chunk.Length, Is.GreaterThanOrEqualTo(3), chunk.Id);
-                Assert.That(chunk.Tier, Is.InRange(0, 3), chunk.Id);
-                Assert.That((int)chunk.Tag, Is.InRange(0, Chunk.TagCount - 1), chunk.Id);
-                foreach (char[] row in chunk.Rows)
+                foreach (int maxLayer in new[] { FieldSpec.MiddleLayer, FieldSpec.TopLayer })
                 {
-                    Assert.AreEqual(FieldSpec.CellsPerRow, row.Length, chunk.Id);
-                    foreach (char c in row)
+                    for (int tier = RouteBeats.TierOf(kind); tier <= 3; tier++)
                     {
-                        Assert.IsTrue("=.^v#ogf*Fsrp".IndexOf(c) >= 0, chunk.Id + ": unknown cell '" + c + "'");
+                        for (int lane = 0; lane < FieldSpec.LaneCount; lane++)
+                        {
+                            for (int layer = 0; layer <= maxLayer; layer++)
+                            {
+                                for (int seed = 1; seed <= 6; seed++)
+                                {
+                                    Beat beat = RouteBeats.Build(kind, lane, layer, maxLayer, tier, 0.5f, new Rng(seed));
+                                    if (beat == null)
+                                    {
+                                        continue;
+                                    }
+
+                                    built++;
+                                    string id = kind + " from " + lane + "/" + layer + " max " + maxLayer + " tier " + tier + " seed " + seed;
+                                    Chunk c = beat.Chunk;
+                                    Assert.That(c.Length, Is.GreaterThanOrEqualTo(3), id);
+                                    Assert.AreEqual(CellType.Track, Chunk.CellOf(c.Code(0, lane, layer, false), true), id + ": starts on the route rail");
+                                    Assert.AreEqual('=', c.Code(c.Length - 1, beat.EndLane, beat.EndLayer, false), id + ": ends on it");
+                                    Assert.That(beat.EndLayer, Is.InRange(0, maxLayer), id);
+                                    Assert.AreEqual(RouteBeats.TagOf(kind), c.Tag);
+                                    for (int r = 0; r < c.Length; r++)
+                                    {
+                                        int rails = 0;
+                                        for (int l = 0; l < FieldSpec.LaneCount; l++)
+                                        {
+                                            for (int y = 0; y < FieldSpec.LayerCount; y++)
+                                            {
+                                                char code = c.Code(r, l, y, false);
+                                                Assert.IsTrue("=.^v#gfsrp".IndexOf(code) >= 0, id + ": cell '" + code + "'");
+                                                if (y > maxLayer)
+                                                {
+                                                    Assert.AreEqual('.', code, id + ": above the open layers, row " + r);
+                                                }
+
+                                                rails += code == '.' ? 0 : 1;
+                                            }
+                                        }
+
+                                        Assert.That(rails, Is.LessThanOrEqualTo(2), id + ": at most two rails side by side, row " + r);
+                                    }
+
+                                    Assert.AreEqual(kind == BeatKind.Dodge, c.HasObstacles, id + ": only dodges hold cubes");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Assert.That(built, Is.GreaterThan(500));
+        }
+
+        [Test]
+        public void EveryBeat_IsSurvivableWithTheStartingFuel()
+        {
+            var b = new BalanceConfig();
+            ShipStats ship = ShipStats.FromLevels(null, b);
+            Assert.AreEqual(b.StartFuel, ship.StartFuel);
+            foreach (BeatKind kind in RouteBeats.All)
+            {
+                for (int lane = 0; lane < FieldSpec.LaneCount; lane++)
+                {
+                    for (int layer = 0; layer < FieldSpec.LayerCount; layer++)
+                    {
+                        for (int seed = 1; seed <= 8; seed++)
+                        {
+                            Beat beat = RouteBeats.Build(kind, lane, layer, FieldSpec.TopLayer, 3, 0f, new Rng(seed));
+                            if (beat == null)
+                            {
+                                continue;
+                            }
+
+                            float left = Survive(beat.Chunk, ship, ship.StartFuel, lane, layer, beat.EndLane, beat.EndLayer);
+                            Assert.That(left, Is.GreaterThanOrEqualTo(0f),
+                                kind + " from " + lane + "/" + layer + " seed " + seed + " cannot be cleared on " + ship.StartFuel + " fuel");
+                        }
                     }
                 }
             }
@@ -44,71 +111,30 @@ namespace BeamRunner.Core.Tests
         [Test]
         public void ChunkText_Notation()
         {
-            var c = new Chunk("test", ChunkTag.Bridge, 0, "2x === =.= ..., ^v# o*f F=s, r=p === ...");
+            var c = new Chunk("test", ChunkTag.Bridge, 0, "2x === =.= ..., ^v# o.f g=s, r=p === ...");
             Assert.AreEqual(4, c.Length, "2x repeats a row");
             Assert.AreEqual('=', c.Code(0, 0, 0, false));
             Assert.AreEqual('.', c.Code(1, 1, 1, false), "groups are bottom, middle, top");
             Assert.AreEqual('^', c.Code(2, 0, 0, false), "lanes left to right");
             Assert.AreEqual('#', c.Code(2, 2, 0, false));
-            Assert.AreEqual('F', c.Code(2, 0, FieldSpec.TopLayer, false));
+            Assert.AreEqual('g', c.Code(2, 0, FieldSpec.TopLayer, false));
             Assert.AreEqual('#', c.Code(2, 0, 0, true), "mirroring swaps the outer lanes");
             Assert.AreEqual('^', c.Code(2, 2, 0, true));
-            Assert.AreEqual('*', c.Code(2, 1, 1, true), "the middle lane stays");
+            Assert.AreEqual('.', c.Code(2, 1, 1, true), "the middle lane stays");
             Assert.AreEqual('p', c.Code(3, 2, 0, false));
             Assert.IsTrue(c.UsesTop);
             Assert.IsTrue(c.HasObstacles);
             Assert.IsFalse(new Chunk("flat", ChunkTag.Bridge, 0, "=== === ..., === .=. ...").UsesTop);
             Assert.AreEqual(CellType.Track, Chunk.CellOf('o', false));
             Assert.AreEqual(CellType.Obstacle, Chunk.CellOf('o', true));
-            Assert.AreEqual(CellType.Empty, Chunk.CellOf('*', true), "gems over a gap");
-            Assert.AreEqual(CellType.Empty, Chunk.CellOf('F', true), "fuel over a gap");
             Assert.AreEqual(CellType.RampDown, Chunk.CellOf('v', false));
-            Assert.IsTrue(Chunk.HoldsFuel('F'));
+            Assert.IsTrue(Chunk.HoldsFuel('f'));
             Assert.IsTrue(Chunk.HoldsGems('g'));
+            Assert.Throws<FormatException>(() => new Chunk("gap pickup", ChunkTag.Gems, 0, "=== .*. ..."), "no gems over gaps");
+            Assert.Throws<FormatException>(() => new Chunk("gap pickup", ChunkTag.Fuel, 0, "=== .F. ..."), "no fuel over gaps");
             Assert.Throws<FormatException>(() => new Chunk("bad", ChunkTag.Bridge, 0, "=== ==="));
             Assert.Throws<FormatException>(() => new Chunk("bad", ChunkTag.Bridge, 0, "=== ==x ..."));
             Assert.Throws<FormatException>(() => new Chunk("bad", ChunkTag.Bridge, 0, "=== ==== ..."));
-        }
-
-        [Test]
-        public void TierZeroChunks_NeverUseTheTopLayer_OrObstacles()
-        {
-            foreach (Chunk chunk in ChunkLibrary.All)
-            {
-                if (chunk.Tier == 0)
-                {
-                    Assert.IsFalse(chunk.UsesTop, chunk.Id + " is placed in level 1, where the top layer is closed");
-                    for (int r = 0; r < chunk.Length; r++)
-                    {
-                        for (int lane = 0; lane < FieldSpec.LaneCount; lane++)
-                        {
-                            Assert.AreEqual('.', chunk.Code(r, lane, FieldSpec.TopLayer, false), chunk.Id + " row " + r);
-                        }
-                    }
-                }
-
-                if (chunk.Tier < 2)
-                {
-                    Assert.IsFalse(chunk.HasObstacles, chunk.Id + ": obstacles are tier 2+ (level 5+)");
-                }
-            }
-        }
-
-        [Test]
-        public void EveryChunk_IsSurvivableWithTheStartingFuel_MirroredAndNot()
-        {
-            var b = new BalanceConfig();
-            ShipStats ship = ShipStats.FromLevels(null, b);
-            Assert.AreEqual(b.StartFuel, ship.StartFuel);
-            foreach (Chunk chunk in ChunkLibrary.All)
-            {
-                foreach (bool mirror in new[] { false, true })
-                {
-                    float left = Survive(chunk, mirror, ship, ship.StartFuel);
-                    Assert.That(left, Is.GreaterThanOrEqualTo(0f),
-                        chunk.Id + (mirror ? " (mirrored)" : "") + " cannot be cleared without a fall on " + ship.StartFuel + " fuel");
-                }
-            }
         }
 
         [Test]
@@ -120,49 +146,64 @@ namespace BeamRunner.Core.Tests
             var chasm = new Chunk("chasm", ChunkTag.Bridge, 0, "=== === ..., ... ... ..., ... ... ..., === === ...");
             float cheapest = ship.RampDownCost + ship.BridgeCost;
             Assert.That(cheapest, Is.LessThan(2f * ship.BridgeCost));
-            Assert.AreEqual(0f, Survive(chasm, false, ship, cheapest), 1e-4f);
-            Assert.That(Survive(chasm, false, ship, cheapest - 0.5f), Is.LessThan(0f));
+            Assert.AreEqual(0f, SurviveAnywhere(chasm, ship, cheapest), 1e-4f);
+            Assert.That(SurviveAnywhere(chasm, ship, cheapest - 0.5f), Is.LessThan(0f));
             var ceiling = new Chunk("ceiling", ChunkTag.Edge, 1, "=== === ===, ... ... #=#, === === ===");
-            Assert.That(Survive(ceiling, false, ship, 0f), Is.GreaterThanOrEqualTo(0f), "ride the top-layer middle lane");
+            Assert.That(SurviveAnywhere(ceiling, ship, 0f), Is.GreaterThanOrEqualTo(0f), "ride the top-layer middle lane");
             var blocked = new Chunk("blocked", ChunkTag.Obstacle, 2, "=== === ===, ### ### ###, === === ===");
-            Assert.That(Survive(blocked, false, ship, 20f), Is.LessThan(0f), "obstacles cannot be built over");
+            Assert.That(SurviveAnywhere(blocked, ship, 20f), Is.LessThan(0f), "obstacles cannot be built over");
         }
 
         /// <summary>
-        /// Most fuel left after riding plain track, the chunk and plain track again (−1 = no surviving route), entering on
-        /// any lane and any layer its tier may use (tier 0 = level 1: the bottom and middle layers) with
-        /// <paramref name="fuel"/>. Optional obstacles are present (the worst case) and the chunk's fuel cells are not
-        /// counted (the level may drop them).
+        /// Fuel left on the exit rail (<paramref name="endLane"/>, <paramref name="endLayer"/>) after riding the route
+        /// rail into the chunk from (<paramref name="lane"/>, <paramref name="layer"/>) with <paramref name="fuel"/>, the
+        /// chunk and the exit rail again (−1 = it can't be reached). Optional obstacles are present (the worst case) and
+        /// the chunk's fuel cells are not counted (the level may drop them).
         /// </summary>
-        private static float Survive(Chunk chunk, bool mirror, ShipStats ship, float fuel)
+        private static float Survive(Chunk chunk, ShipStats ship, float fuel, int lane, int layer, int endLane, int endLayer)
         {
-            int maxLayer = chunk.Tier == 0 ? FieldSpec.MiddleLayer : FieldSpec.TopLayer;
+            RouteSolver.CellReader cell = (tile, l, y) =>
+            {
+                if (tile < 0)
+                {
+                    return l == lane && y == layer ? CellType.Track : CellType.Empty;
+                }
+
+                if (tile >= chunk.Length)
+                {
+                    return l == endLane && y == endLayer ? CellType.Track : CellType.Empty;
+                }
+
+                return Chunk.CellOf(chunk.Code((int)tile, l, y, false), true);
+            };
+            float[] from = Run(chunk, ship, cell, s => s == RouteSolver.State(lane, layer, BuildKind.None) ? fuel : -1f);
+            return from[RouteSolver.State(endLane, endLayer, BuildKind.None)];
+        }
+
+        /// <summary>Most fuel left after plain track on every layer, the chunk and plain track again, entering anywhere.</summary>
+        private static float SurviveAnywhere(Chunk chunk, ShipStats ship, float fuel)
+        {
+            RouteSolver.CellReader cell = (tile, lane, layer) => tile < 0 || tile >= chunk.Length
+                ? CellType.Track
+                : Chunk.CellOf(chunk.Code((int)tile, lane, layer, false), true);
+            return RouteSolver.Best(Run(chunk, ship, cell, s => fuel));
+        }
+
+        private static float[] Run(Chunk chunk, ShipStats ship, RouteSolver.CellReader cell, Func<int, float> start)
+        {
             var solver = new RouteSolver
             {
                 BridgeCost = ship.BridgeCost,
                 RampUpCost = ship.RampUpCost,
                 RampDownCost = ship.RampDownCost,
                 MaxFuel = ship.MaxFuel,
-                MaxLayer = maxLayer,
-            };
-            RouteSolver.CellReader cell = (tile, lane, layer) =>
-            {
-                if (tile < 0 || tile >= chunk.Length)
-                {
-                    return layer <= maxLayer ? CellType.Track : CellType.Empty;
-                }
-
-                return Chunk.CellOf(chunk.Code((int)tile, lane, layer, mirror), true);
+                MaxLayer = FieldSpec.TopLayer,
             };
             var from = new float[RouteSolver.StateCount];
             var to = new float[RouteSolver.StateCount];
-            RouteSolver.Clear(from);
-            for (int lane = 0; lane < FieldSpec.LaneCount; lane++)
+            for (int s = 0; s < from.Length; s++)
             {
-                for (int layer = 0; layer <= maxLayer; layer++)
-                {
-                    from[RouteSolver.State(lane, layer, BuildKind.None)] = fuel;
-                }
+                from[s] = RouteSolver.BuiltOf(s) == BuildKind.None ? start(s) : -1f;
             }
 
             for (long t = -PlainTiles; t < chunk.Length + PlainTiles; t++)
@@ -173,23 +214,87 @@ namespace BeamRunner.Core.Tests
                 to = swap;
             }
 
-            return RouteSolver.Best(from);
+            return from;
         }
 
         [Test]
-        public void EveryLevelThroughThePlateau_HasChunksToPickFrom()
+        public void EveryLevelThroughThePlateau_HasBuildBeatsToPickFrom()
         {
             for (int level = 1; level <= Levels.PlateauLevel + Levels.PlateauCycle.Length; level++)
             {
                 LevelSpec spec = Levels.Get(level);
                 bool any = false;
-                foreach (Chunk c in ChunkLibrary.All)
+                foreach (BeatKind k in RouteBeats.All)
                 {
-                    any |= c.Tier <= spec.MaxChunkTier && spec.TagWeights[(int)c.Tag] > 0f && (!c.UsesTop || spec.TopLayer) &&
-                           (!c.HasObstacles || spec.Obstacles);
+                    ChunkTag tag = RouteBeats.TagOf(k);
+                    any |= RouteBeats.TierOf(k) <= spec.MaxChunkTier && spec.TagWeights[(int)tag] > 0f &&
+                           tag != ChunkTag.Fuel && tag != ChunkTag.Gems && (tag != ChunkTag.Obstacle || spec.Obstacles);
                 }
 
-                Assert.IsTrue(any, "level " + level + " has no chunk");
+                Assert.IsTrue(any, "level " + level + " has nothing to build or steer through");
+            }
+        }
+
+        [Test]
+        public void GeneratedTrack_IsAFewRails_NotTheOpenGrid_AndNoPickupFloatsOverAGap()
+        {
+            for (int seed = 1; seed <= 6; seed++)
+            {
+                var course = new Course(1);
+                var grid = new TrackGrid();
+                var pickups = new List<Pickup>();
+                new TrackGenerator(seed, course, false, null, new BalanceConfig(), null, grid, pickups)
+                    .GenerateUntil(course.WallTile(10) + 1);
+                int rows = 0;
+                int rails = 0;
+                for (long t = 0; t <= course.WallTile(10); t++)
+                {
+                    TrackRow row = grid.Row(t);
+                    int level = row.Level;
+                    long rel = t - course.LevelStartTile(level);
+                    bool open = rel < Levels.IntroTiles + (level == 1 ? 2 : 0) || t >= course.WallTile(level) - Levels.RunwayTiles;
+                    if (open)
+                    {
+                        continue;
+                    }
+
+                    int n = 0;
+                    for (int i = 0; i < FieldSpec.CellsPerRow; i++)
+                    {
+                        n += row.Cells[i] == CellType.Empty ? 0 : 1;
+                    }
+
+                    Assert.That(n, Is.LessThanOrEqualTo(3), "seed " + seed + " tile " + t + ": more than three rails side by side");
+                    rows++;
+                    rails += n;
+                }
+
+                float mean = rails / (float)rows;
+                Assert.That(mean, Is.InRange(1.2f, 2.2f), "seed " + seed + ": the route plus branches, not one rail nor the grid");
+                foreach (Pickup p in pickups)
+                {
+                    long tile = FieldSpec.TileOf(p.Z);
+                    Assert.IsTrue(Cells.Solid(grid.Get(tile, p.Lane, p.Layer)) && grid.Get(tile, p.Lane, p.Layer) != CellType.Obstacle,
+                        "seed " + seed + ": a " + p.Kind + " over a gap at tile " + tile + " lane " + p.Lane + " layer " + p.Layer);
+
+                    // Never in front of a gap, a drop, a ramp down or a cube: the track goes on behind it in clear sight.
+                    int y = p.Layer + Cells.LayerDelta(grid.Get(tile, p.Lane, p.Layer));
+                    for (int k = 1; k <= TrackGenerator.SightTiles; k++)
+                    {
+                        TrackRow row = grid.Row(tile + k);
+                        if (row == null || row.IsWall)
+                        {
+                            break;
+                        }
+
+                        CellType c = row.Get(p.Lane, y);
+                        Assert.IsTrue(c == CellType.Track || c == CellType.RampUp,
+                            "seed " + seed + ": a " + p.Kind + " at tile " + tile + " hides " + c + " " + k + " tile(s) behind it");
+                        y += Cells.LayerDelta(c);
+                    }
+                }
+
+                Assert.That(pickups.Count, Is.GreaterThan(60), "seed " + seed + ": still plenty to pick up");
             }
         }
 

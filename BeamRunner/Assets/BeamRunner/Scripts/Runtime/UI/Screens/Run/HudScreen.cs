@@ -171,6 +171,7 @@ namespace BeamRunner.UI
             BuildChips();
             BuildGhostChip(); // Daily Run ghost gap (HudScreen.Ghost.cs)
             BuildBottom();
+            BuildLayers(); // which layer the craft rides (HudScreen.Layers.cs)
 
             yield return null;
             BuildHint();
@@ -440,6 +441,7 @@ namespace BeamRunner.UI
             _fuelState = -1;
             _hullDisplayed = -1;
             _hullMaxDisplayed = -1;
+            _layerLevel = -1;
             _emptyFlash = 0f;
             _multIdle = false;
             _multGroup.alpha = 1f;
@@ -498,6 +500,7 @@ namespace BeamRunner.UI
             UpdateChips(run);
             UpdateFuel(run, dt);
             UpdateHull(run);
+            UpdateLayers(run);
             UpdateGhostChip();
         }
 

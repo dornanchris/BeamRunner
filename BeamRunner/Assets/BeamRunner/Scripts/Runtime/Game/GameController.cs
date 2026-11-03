@@ -388,7 +388,7 @@ namespace BeamRunner.Game
         private void StartAttract()
         {
             // A random level each time, so the menu background shows every kind of chunk; the bot gets a roomy fuel tank
-            // and never crashes (the background should never end in an explosion), and checkpoints pass on their own.
+            // and never crashes (the background should never end in an explosion).
             int level = UnityEngine.Random.Range(1, Levels.NamedLevels + 1);
             _attract = new RunSimulation(new RunConfig
             {
@@ -397,7 +397,6 @@ namespace BeamRunner.Game
                 StartLevel = level,
                 Ship = Core.Balance.ShipStats.FromLevels(new[] { 10, 6, 10, 4, 0 }),
                 Invincible = true,
-                AutoCheckpoint = true,
             });
             OnSimulationReplaced();
         }
@@ -483,7 +482,6 @@ namespace BeamRunner.Game
             if (FootageMode.Enabled)
             {
                 config.Invincible = true; // footage runs never end in a crash
-                config.AutoCheckpoint = true;
                 config.Tutorial = false;
                 config.Adaptive = false;
             }
@@ -600,10 +598,6 @@ namespace BeamRunner.Game
                     if (e.Type == RunEventType.Crashed)
                     {
                         OnCrashed();
-                    }
-                    else if (e.Type == RunEventType.CheckpointReached && !run.Config.AutoCheckpoint)
-                    {
-                        OnCheckpointReached(e.Count);
                     }
                 }
             }

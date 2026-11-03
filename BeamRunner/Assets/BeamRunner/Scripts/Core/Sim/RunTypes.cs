@@ -52,9 +52,6 @@ namespace BeamRunner.Core.Sim
 
         /// <summary>The pilot's hidden rating moves after this run (normal runs; not the tutorial or the Daily Run).</summary>
         public bool Adaptive;
-
-        /// <summary>Checkpoints continue on their own after a short pause (bots, the menu background, footage).</summary>
-        public bool AutoCheckpoint;
     }
 
     /// <summary>Why a run ended.</summary>
@@ -76,7 +73,7 @@ namespace BeamRunner.Core.Sim
         HullBroken,
     }
 
-    /// <summary>A one-time boost picked at a level wall checkpoint (lasts the rest of the run).</summary>
+    /// <summary>A one-time boost a level wall gives the craft (picked for the pilot; lasts the rest of the run).</summary>
     public enum CheckpointPerk
     {
         None = 0,

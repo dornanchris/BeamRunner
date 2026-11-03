@@ -115,12 +115,12 @@ namespace BeamRunner.Rendering
             Emit(_glints, position, hot, 10);
         }
 
-        /// <summary>Gem pickup: a few glints, a pinch of sparks and a small ring.</summary>
+        /// <summary>Gem or fuel pickup: a couple of glints, a pinch of sparks and a small ring (kept light: the track behind must stay readable).</summary>
         public void Sparkle(Vector3 position, Color color)
         {
-            Emit(_glints, position, Color.Lerp(color, Color.white, 0.4f), 5);
-            Emit(_sparks, position, color, 10);
-            EmitSized(_rings, position, color, 1, 1.4f);
+            Emit(_glints, position, Color.Lerp(color, Color.white, 0.4f), 2);
+            Emit(_sparks, position, color, 5);
+            EmitSized(_rings, position, color, 1, 0.7f);
         }
 
         /// <summary>Gate block or cube smashed in Overdrive / by the shield / on revive.</summary>
@@ -137,12 +137,12 @@ namespace BeamRunner.Rendering
         /// <summary>Power-up collected (shield, magnet, overdrive cell) — rings and glints around the ship.</summary>
         public void PowerUpBurst(Vector3 position, Color color)
         {
+            // Half of what it was: a power-up must not hide the track ahead for a moment.
             Color hot = Color.Lerp(color, Color.white, 0.5f);
-            EmitSized(_flash, position, hot, 1, 2.6f);
-            EmitSized(_rings, position, color, 1, 3.8f);
-            EmitSized(_rings, position, hot, 1, 2.2f);
-            Emit(_glints, position, hot, 10);
-            Emit(_sparks, position, color, 24);
+            EmitSized(_flash, position, hot, 1, 1.3f);
+            EmitSized(_rings, position, color, 1, 1.9f);
+            Emit(_glints, position, hot, 5);
+            Emit(_sparks, position, color, 12);
         }
 
         /// <summary>Near miss: a grinding spray of sparks at the craft's flank facing the obstacle.</summary>

@@ -146,6 +146,9 @@ namespace BeamRunner.Rendering
             SetBeat(0f, 0.0);
             SetSpeed01(0f);
             SetFlash(0f);
+            SetSkyRotation(Quaternion.identity);
+            SetNextTheme(ZoneThemes.ForLevel(2));
+            SetSurfacePatterns(0, 1);
             SetQuality(_quality);
         }
 
@@ -230,6 +233,38 @@ namespace BeamRunner.Rendering
             SetColorC(ToColor(ColorRGB.Lerp(from.Accent, to.Accent, t)));
             SetBaseColor(ToColor(ColorRGB.Lerp(from.Base, to.Base, t)));
             SetFogColor(ToColor(ColorRGB.Lerp(from.Fog, to.Fog, t)));
+        }
+
+        /// <summary>
+        /// Palette of the next level, which the wall ahead already wears (the Surface shader's next face and the next
+        /// level's rails); the current palette takes it over as the craft turns up the wall.
+        /// </summary>
+        public static void SetNextTheme(ZoneTheme theme)
+        {
+            if (theme == null)
+            {
+                return;
+            }
+
+            SetGlobalColorSrgb(ShaderIds.FieldNextColorA, ToColor(theme.Primary));
+            SetGlobalColorSrgb(ShaderIds.FieldNextColorB, ToColor(theme.Secondary));
+            SetGlobalColorSrgb(ShaderIds.FieldNextColorC, ToColor(theme.Accent));
+            SetGlobalColorSrgb(ShaderIds.FieldNextBaseColor, ToColor(theme.Base));
+        }
+
+        /// <summary>Surface patterns (see the Surface shader) of the face under the track and of the wall ahead.</summary>
+        public static void SetSurfacePatterns(int current, int next)
+        {
+            Shader.SetGlobalVector(ShaderIds.FieldSurfacePattern, new Vector4(current, next, 0f, 0f));
+        }
+
+        /// <summary>
+        /// Orientation of the world relative to the sky (the turns of every wall climbed so far, and of the one being
+        /// climbed): the sky turns with the track, so climbing a wall reads as the whole world rotating.
+        /// </summary>
+        public static void SetSkyRotation(Quaternion world)
+        {
+            Shader.SetGlobalMatrix(ShaderIds.FieldSkyRotation, Matrix4x4.Rotate(Quaternion.Inverse(world)));
         }
 
         // ------------------------------------------------------------------ fog, motion, pulses

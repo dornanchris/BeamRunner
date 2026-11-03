@@ -298,7 +298,8 @@ namespace BeamRunner.EditorTools
                 return null;
             }
 
-            bool release = kind != Kind.AndroidDevApk;
+            // Development builds never reach the store (FieldMonetizationBuildGuard exempts them too).
+            bool release = kind != Kind.AndroidDevApk && !development;
             if (release)
             {
                 // Same rule as FieldMonetizationBuildGuard (which also covers File ▸ Build), checked up front so the

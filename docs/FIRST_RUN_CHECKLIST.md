@@ -15,6 +15,70 @@ block sizes. **Not yet checked by a person:**
 - [ ] Store identity: new bundle id (`com.cddevs.beamrunner`), LevelPlay app keys / ad units and iosAppId were blanked
       (CubeField's), product ids are `beamrunner.*`; the privacy/terms URLs in `monetization.json` are still CubeField's.
 
+### Playtest pass 2 (2026-10-29): camera, beam world, pace, swipes, walls you ride up
+Verified with Unity 6000.3.25f1 in batchmode on macOS: compiles with 0 errors, all EditMode tests and the PlayMode smoke
+tests pass, and an autopilot run through levels 1–5 was rendered offscreen in portrait and landscape (mid-level, the
+wall from far and near, mid-bend, the start of the next level). **Still to judge on a device:**
+- [ ] Camera (`CameraRig.RunHeight` 1.5, `RunBack` 7, `RunLookDrop` 1.1): the layer above no longer crosses the view
+      from the middle layer, the layer below reads clearly; the craft sits a little below the screen centre in portrait.
+      The layer above fades in from 6 m to 40 m ahead (`TrackRenderer.AboveFade*`) — enough warning for ramps up?
+- [ ] The bend up the wall (`RunSimulation.ClimbSeconds` 0.5 s, `TrackSpace.PivotY`): readable, not nauseating, at 60
+      and 30 fps; the world and the sky turn together, nothing jumps when the bend completes (the frame change), the
+      perk popup and the level banner don't collide. The Daily Run ghost and FX bursts near a bend sit where expected.
+- [ ] The beam world (`SurfaceView`, Surface + Sky shaders): the tower of the next level reads as "where I'm going"
+      from the start of each level; the sky haze / nebula never hides the rails in any palette (levels 3 and 5 are the
+      most saturated); stars don't shimmer; quality LOW (`FIELD_LITE`) still looks right. Shader compile on Android
+      (GLES3/Vulkan) and iOS (Metal) — only Metal on macOS was seen.
+- [ ] Pace: 18 → 30 m/s, levels of 36 / 44 / 52 / 60 tiles (a wall every 15–20 s); the autopilot still clears levels
+      1–4 at Standard (EditMode tests), but a person's first runs need checking. The tutorial now ends after 200 m.
+- [ ] Swipes: one lane per swipe at 10 % of the screen width (÷ sensitivity) — not sluggish for quick double moves?
+- [ ] Monetization: the checkpoint's rewarded "take all three perks" ad is gone with the checkpoint screen.
+
+### Playtest pass 3 (2026-10-30): one forced route, readable layers
+Verified: compiles, all EditMode tests pass (beats clearable on the starting fuel from every start, no pickup over a
+gap in generated tracks, at most two rails side by side, the autopilot still clears levels 1–4), frames rendered for
+levels 1–6. **To judge on the phone:**
+- [ ] The single route (`RouteBeats`, `TrackGenerator`): enough drama, not unfair. Missing a bridge without a net is now
+      usually death — nets: levels 1–2 always, later 60 → 15 % (`TryPlaceBeat`'s `netChance`). One-tile lane overlaps
+      from level 2 at 30 m/s.
+- [ ] Start fuel 15 / tank 24 (`BalanceConfig`): too generous now that every build is forced?
+- [ ] Reading other layers: struts under rails, end/start caps, the build outline turning into a ramp when the route
+      goes on a layer up or down (`TrackRenderer.Ghost`, `Continuation`), the layer above at 45 % overhead.
+
+### Playtest pass 4 (2026-10-30): branches, swipes that build
+Verified: compiles, all EditMode tests pass (a swipe builds a diagonal on the next tile that the craft rides into the
+next lane; over a gap it costs a bridge; branches keep tracks at 1.2–2.2 rails a tile; the autopilot still clears
+levels 1–4), frames rendered for levels 1–4. **To judge on the phone:**
+- [ ] Swipes as builds: a full tile to change lane — responsive enough at 30 m/s? (Two lanes now take two tiles.)
+- [ ] Branches (`OverlayBranch`): enough choice without the old clutter.
+- [ ] Gems and fuel cells (smaller, 1.2 m above the rail): the rail behind them shows; still easy to aim for.
+- [ ] Start fuel 12.
+
+### Playtest pass 5 (2026-10-30): less clutter, the layer gauge
+Verified: compiles, all EditMode and PlayMode tests pass (the PlayMode runs boot the HUD). The gauge itself was not seen
+rendered. **To judge on the phone:**
+- [ ] The layer gauge (`HudScreen.Layers.cs`): readable at a glance at the left edge, not in the way of swipes or
+      pickups; the ceiling line throbbing on the top layer is noticed.
+- [ ] About 30 % less clutter: no struts, ticks only on the craft's layer, ceiling stripes only from the top layer, dimmer
+      caps and other layers, fewer seams / windows / speed lines / stars. Still enough to read speed and the layers?
+- [ ] The tunnel (`SurfaceView` side walls, the Surface shader's side branch): feels like a channel through the void, not
+      claustrophobic; the walls' rims don't read as rails; it turns up the wall cleanly mid-bend.
+- [ ] Ramps in the colour of the layer they lead to, with up/down chevrons (`TrackRenderer.RampArrows`): readable from
+      far enough ahead.
+- [ ] Pickups never stand in front of a gap, drop, ramp down or cube (`TrackGenerator.InClearSight`): the track behind
+      every gem / fuel cell / power-up is readable; are there still enough of them? Start speed 19.8 m/s.
+- [ ] Pickup feedback halved (`FxLibrary.Sparkle` / `PowerUpBurst`: half the particles, half-size rings, one ring; no
+      second burst or screen pulse when a power-up starts or a trail completes; smaller HUD popups): still satisfying?
+
+### Roadside brand sign (2026-11-02)
+Once per level a LightLancer-style billboard (dark board, neon edges, glowing dot lettering "BEAMRUNNER") stands just
+off the track (`SignageView`, placed by `Core/Field/Signs.cs`), so footage shows the name in the world, not as a
+croppable overlay. A first, larger neon-tube version was judged too obvious on the phone and replaced. **To judge on
+the phone:**
+- [ ] Subtle enough, yet readable in a screen recording; never mistaken for an obstacle.
+- [ ] The posts running down to the beam far below: fine, or would a sign mounted on the tunnel wall read better?
+- [ ] Next level's sign on the wall ahead and coming down through the bend: no pop when the bend completes.
+
 The rest of this list is CubeField 3D's and still applies to the shared infrastructure.
 
 BeamRunner was forked from Neo Slipstream and rebuilt **without a Unity Editor**: all C# compiles with 0 errors and
@@ -131,29 +195,13 @@ type errors, not Unity's own HLSL / GLSL / Metal compilation); the chase-camera 
 and gate corners projected for 9:19.5, 9:16 and 16:9); the fog maths (obstacles at full fog = the floor / sky behind
 them) and the sun's position outside the far field's footprint were worked out by hand. Nothing was rendered.
 
-- [ ] **Shaders compile in Unity**: no errors or warnings for `BeamRunner/Grid` (both variants), `BeamRunner/Sky`,
+- [ ] **Shaders compile in Unity**: no errors or warnings for `BeamRunner/Surface` (both variants), `BeamRunner/Sky` (both),
       `BeamRunner/NeonSolid` (both variants — `FIELD_DITHER` is a `multi_compile_local`), `BeamRunner/Additive`,
       `BeamRunner/Hologram` — also after switching to Android (GLES3 and Vulkan) and iOS (Metal). `FieldCommon.cginc`
       changed for every shader (no bend; radial fog; `_FieldLightDir`; `FieldSkyColor` / `FieldFogOpaque`).
-- [ ] **Floor grid**: looking straight ahead from the centre, the lane lines (x = ±1, ±3 … ±9 m) run exactly through the
-      gaps between a gate's blocks; the field's side rails (x = ±9) are brighter and carry light pulses; no moiré or
-      shimmer far away at grazing angles; the 4 m / 20 m cross lines never appear to crawl backwards at top speed in
-      Overdrive, at 60 and at 30 fps (motion blur from `_FieldScrollDelta`).
-- [ ] **Horizon**: the floor melts into the fog with a glow and the sky's horizon colour matches it with **no visible
-      seam or floor edge**, in every level palette (levels 1–7 cycle) — fly in the bottom row too (the floor's far edge is
-      then only ~1° below the horizon; the sky's band starts exactly at the horizon so that strip must match the floor),
-      and watch the Menu camera swing sideways.
-- [ ] **Sky**: stars above the horizon, twinkling but not busy; no seam directly behind the camera (azimuth wrap of the
-      star grid); the synthwave sun sits low **to the left** (16° azimuth, 7° up — moved off the vanishing point so far
-      gates never sit on it as dark squares), fully visible in landscape and in portrait (except when the craft is at the
-      far left and the camera yaws right) and does not wash out the field (tune `_SunIntensity` / `_SunSize` on
-      `FieldMaterials.Sky`). The sky never shows as a small ball (that would mean the Sky shader fell back) and is never
-      clipped by the far plane (300 m; sky radius 265 m).
-- [ ] **Ceiling**: a dim see-through grid 3 m above the field; does not crowd the view with the craft at the top edge;
-      Y-sliding walls whose margin rows rise above the field look acceptable through it; quality LOW hides it.
-- [ ] **Play-area frame**: the light arches every 20 m sit exactly on the floor's 20 m major lines (watch a long run —
-      no drift), fade out before they pass the camera, and the top-corner rails do not streak distractingly while flying
-      in the top corners. The field boundary reads at a glance.
+- [ ] *(BeamRunner replaced CubeField's floor grid, horizon, synthwave sun, ceiling grid and play-area frame with the
+      beam world: see "Playtest pass 2" in §0. The sky must never show as a small ball — the Sky shader fell back — nor
+      be clipped: far plane 1000 m, sky radius 900 m.)*
 - [ ] **Speed lines** appear only outside the field (left, right and above), never inside the play area or under the floor.
 - [ ] **Fog-in, no silhouettes**: new walls and cubes spawn ~197 m from the camera; there they must be invisible against
       the fogged floor, the horizon band and the sky (NeonSolid fades toward the same colours: `FieldFogOpaque`) and

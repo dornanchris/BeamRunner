@@ -127,12 +127,12 @@ namespace BeamRunner.Rendering
                     _modelFilter.sharedMesh = MeshFactory.FuelCell();
                     _modelRenderer.sharedMaterial = FieldMaterials.Obstacle();
                     SetSolidColor(color, 3.6f, 0.4f);
-                    _modelScale = 1.15f;
+                    _modelScale = 0.8f; // small: the rail behind must show past it
                     break;
                 default:
                     _modelFilter.sharedMesh = MeshFactory.Octahedron();
                     _modelRenderer.sharedMaterial = FieldMaterials.Gem();
-                    _modelScale = 1.3f;
+                    _modelScale = 0.75f; // small: the rail behind must show past it
                     break;
             }
 
@@ -143,22 +143,22 @@ namespace BeamRunner.Rendering
             _haloBlock.SetColor(ShaderIds.TintColor, color);
             _haloBlock.SetFloat(ShaderIds.Intensity, 1f);
             _haloRenderer.SetPropertyBlock(_haloBlock);
-            _halo.localScale = Vector3.one * (_kind == PickupKind.Gem || _kind == PickupKind.Fuel ? 0.95f : 1.5f * PowerUpScale);
+            _halo.localScale = Vector3.one * (_kind == PickupKind.Gem || _kind == PickupKind.Fuel ? 0.55f : 1.5f * PowerUpScale);
             _modelRenderer.enabled = !_hidden;
             _haloRenderer.enabled = !_hidden;
         }
 
         /// <summary>
-        /// Positions and animates the pickup (collection FX fire here if the flag is seen first); <paramref name="cameraZ"/>
-        /// drives the fade-out of a missed pickup.
+        /// Positions (in <see cref="TrackSpace"/>) and animates the pickup (collection FX fire here if the flag is seen
+        /// first); <paramref name="cameraZ"/> (the camera in the same space) drives the fade-out of a missed pickup.
         /// </summary>
         internal void Tick(Pickup pickup, double shipDistance, double time, FxLibrary fx, float cameraZ)
         {
             _pickup = pickup;
-            float z = FieldMath.WorldZ(pickup.Z, shipDistance);
+            float z = TrackSpace.Map(pickup.X, pickup.Y, pickup.Z).z;
             if (pickup.Collected && !_collectFxDone)
             {
-                _lastPosition = new Vector3(pickup.X, pickup.Y, z);
+                _lastPosition = TrackSpace.ToWorld(pickup.X, pickup.Y, pickup.Z);
                 Collect(fx);
             }
 
@@ -183,9 +183,10 @@ namespace BeamRunner.Rendering
 
             float t = (float)(time % 3600.0);
             float bob = Mathf.Sin(t * 3.1f + _phase) * 0.07f;
-            var position = new Vector3(pickup.X, pickup.Y + bob, z);
+            Vector3 position = TrackSpace.Map(pickup.X, pickup.Y + bob, pickup.Z);
             transform.localPosition = position;
-            _lastPosition = position;
+            transform.localRotation = TrackSpace.Tilt(pickup.Z);
+            _lastPosition = TrackSpace.ToWorld(position);
 
             if (fade < 1f || _model.localScale.x != _modelScale)
             {
@@ -233,7 +234,7 @@ namespace BeamRunner.Rendering
         {
             if (fx != null && _pickup != null && _pickup.Collected && !_collectFxDone)
             {
-                _lastPosition = new Vector3(_pickup.X, _pickup.Y, FieldMath.WorldZ(_pickup.Z, shipDistance));
+                _lastPosition = TrackSpace.ToWorld(_pickup.X, _pickup.Y, _pickup.Z);
                 Collect(fx);
             }
 

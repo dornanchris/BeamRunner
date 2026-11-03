@@ -7,9 +7,10 @@ namespace BeamRunner.Core.Diagnostics
     /// <summary>
     /// Bots that ride a <see cref="RunSimulation"/> by its public state only (the grid it exposes, no generator internals):
     /// the menu's attract run, the footage pilot, the PlayMode smoke tests and the balance tests. Pure and deterministic.
-    /// <see cref="FollowLine"/> plans a few tiles ahead with a <see cref="RouteSolver"/>: once per tile it picks the lane
-    /// and the build for the next tile that keep a route alive with the most fuel, with a pull toward gems and fuel and a
-    /// preference for building nothing; in a fall it steers toward a rail to land on. <see cref="SeekCrash"/> builds ramps
+    /// <see cref="FollowLine"/> plans a few tiles ahead with a <see cref="RouteSolver"/>: each tile it picks the build for
+    /// the next tile — nothing, a bridge, a ramp or a diagonal into the next lane — that keeps a route alive with the most
+    /// fuel, with a pull toward gems and fuel and a preference for building nothing; in a fall it steers toward a rail to
+    /// land on. <see cref="SeekCrash"/> builds ramps
     /// down until it drops into the void.
     /// </summary>
     public static class RunAutopilot
@@ -70,10 +71,7 @@ namespace BeamRunner.Core.Diagnostics
                         return new RunInput();
                     }
 
-                    int lane;
-                    BuildKind build;
-                    Plan(sim, out lane, out build);
-                    return new RunInput { UseAbsoluteLane = true, AbsoluteLane = lane, Build = build };
+                    return new RunInput { Build = Plan(sim) };
                 }
                 finally
                 {
@@ -103,87 +101,73 @@ namespace BeamRunner.Core.Diagnostics
 
         // ------------------------------------------------------------------ planning
 
-        private static void Plan(RunSimulation sim, out int bestLane, out BuildKind bestBuild)
+        /// <summary>
+        /// The build for the next tile (None = ride what is there; a switch = the diagonal a swipe builds) that keeps a
+        /// route alive with the most fuel, with a pull toward gems and fuel and a slight preference for building nothing.
+        /// </summary>
+        private static BuildKind Plan(RunSimulation sim)
         {
             ShipStatsCosts(sim);
-            long t = sim.Tile;
-            int lane = sim.TargetLane;
-            int layer = sim.Layer;
-            CellType here = sim.Grid.Get(t, lane, layer);
-            bool flat = here == CellType.Track || here == CellType.Wall;
-            int exitLayer = layer + (Cells.IsRamp(here) ? Cells.LayerDelta(here) : 0);
-            if (exitLayer < 0 || exitLayer > FieldSpec.TopLayer)
+            long tile;
+            int lane;
+            int layer;
+            if (!sim.BuildTarget(out tile, out lane, out layer))
             {
-                exitLayer = Math.Max(0, Math.Min(FieldSpec.TopLayer, exitLayer));
+                return BuildKind.None;
             }
 
-            bestLane = lane;
-            bestBuild = BuildKind.None;
+            CellType next = sim.Grid.Get(tile, lane, layer);
+            TrackRow nextRow = sim.Grid.Row(tile);
+            BuildKind best = BuildKind.None;
             float bestScore = float.MinValue;
-            for (int d = -1; d <= 1; d++)
+            for (int b = 0; b < 6; b++)
             {
-                int l2 = lane + d;
-                if (l2 < 0 || l2 >= FieldSpec.LaneCount)
+                var kind = (BuildKind)b;
+                int toLane = lane + (kind == BuildKind.SwitchLeft ? -1 : kind == BuildKind.SwitchRight ? 1 : 0);
+                float cost = Cells.IsSwitch(kind) ? sim.SwitchCost(next) : sim.BuildCost(kind);
+                if (kind != BuildKind.None)
                 {
-                    continue;
-                }
-
-                if (d != 0 && (!flat || sim.Grid.Get(t, l2, layer) != CellType.Track))
-                {
-                    continue;
-                }
-
-                CellType next = sim.Grid.Get(t + 1, l2, exitLayer);
-                TrackRow nextRow = sim.Grid.Row(t + 1);
-                for (int b = 0; b < 4; b++)
-                {
-                    var kind = (BuildKind)b;
-                    if (kind != BuildKind.None)
-                    {
-                        if (!sim.CanAfford(kind) || next == CellType.Obstacle || next == CellType.Wall ||
-                            nextRow != null && nextRow.IsWall || next == Cells.FromBuild(kind))
-                        {
-                            continue;
-                        }
-
-                        if (kind == BuildKind.RampUp && exitLayer >= FieldSpec.TopLayer ||
-                            kind == BuildKind.RampDown && exitLayer <= 0)
-                        {
-                            continue; // the ceiling and the void
-                        }
-                    }
-
-                    float fuel = sim.Fuel - sim.BuildCost(kind);
-                    float score = Evaluate(sim, t + 1, l2, exitLayer, kind, fuel);
-                    if (score <= float.MinValue)
+                    if (cost > sim.Fuel + 1e-4f || next == CellType.Obstacle || next == CellType.Wall ||
+                        nextRow != null && nextRow.IsWall || next == Cells.FromBuild(kind))
                     {
                         continue;
                     }
 
-                    score -= Math.Abs(d) * 0.15f + sim.BuildCost(kind) * 0.35f;
-                    if (nextRow != null)
+                    if (kind == BuildKind.RampUp && layer >= FieldSpec.TopLayer || kind == BuildKind.RampDown && layer <= 0 ||
+                        toLane < 0 || toLane >= FieldSpec.LaneCount || sim.Grid.Get(tile, toLane, layer) == CellType.Obstacle)
                     {
-                        int cell = FieldSpec.CellIndex(l2, exitLayer);
-                        score += nextRow.Gems[cell] * 0.6f + nextRow.Fuel[cell] * 0.3f;
+                        continue; // the ceiling, the void, the field's side, a cube beside the diagonal
                     }
+                }
 
-                    if (score > bestScore)
-                    {
-                        bestScore = score;
-                        bestLane = l2;
-                        bestBuild = kind;
-                    }
+                float fuel = sim.Fuel - cost;
+                float score = Evaluate(sim, tile, lane, layer, kind, fuel);
+                if (score <= float.MinValue)
+                {
+                    continue;
+                }
+
+                score -= (Cells.IsSwitch(kind) ? 0.15f : 0f) + cost * 0.35f;
+                TrackRow after = sim.Grid.Row(tile + 1);
+                if (after != null)
+                {
+                    int cell = FieldSpec.CellIndex(toLane, layer);
+                    score += after.Gems[cell] * 0.6f + after.Fuel[cell] * 0.3f;
+                }
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = kind;
                 }
             }
 
-            if (bestScore <= float.MinValue)
+            if (bestScore <= float.MinValue && next == CellType.Empty && sim.CanAfford(BuildKind.Bridge))
             {
-                // Nothing survives the horizon: at least keep a rail under the craft.
-                bestLane = lane;
-                bestBuild = sim.Grid.Get(t + 1, lane, exitLayer) == CellType.Empty && sim.CanAfford(BuildKind.Bridge)
-                    ? BuildKind.Bridge
-                    : BuildKind.None;
+                return BuildKind.Bridge; // nothing survives the horizon: at least keep a rail under the craft
             }
+
+            return best;
         }
 
         /// <summary>Best fuel left after the horizon when entering <paramref name="tile"/> as given, or MinValue.</summary>

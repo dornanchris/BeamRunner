@@ -36,7 +36,6 @@ turn is built on the spot), and subscribes to controller events:
 | Countdown | HUD + countdown overlay |
 | Running | HUD (+ tutorial hints on tutorial runs) |
 | Paused | HUD (dimmed) + Pause |
-| Checkpoint | HUD (dimmed) + Checkpoint (level wall: stats, perk pick) |
 | Crashed | HUD fades; revive offer when `ReviveOfferActive` (never in a Daily Run) |
 | GameOver | Results |
 
@@ -161,10 +160,9 @@ Giant 3 · 2 · 1 · GO! pops with glow, colour cycling through the palette.
 ### Pause
 "PAUSED", score and "LEVEL n · distance" so far, the three missions' live progress, RESUME (primary), RESTART, SETTINGS, MENU.
 
-### Checkpoint (popup)
-"LEVEL n CLEAR", the run so far ("SCORE · GEMS · M"), "PICK AN UPGRADE" and three perk buttons (icon, name, one-line
-effect; `GameController.CheckpointPerks`, `ChooseCheckpointPerk(i)`), and TAKE ALL THREE (rewarded ad, when one is
-ready; `TakeAllPerksWithAd`). Back picks the first perk. The run continues on the next level's middle layer.
+### Level wall (HUD only)
+No screen: the craft rides up the wall into the next level. The HUD shows "LEVEL n CLEAR" with the bonus, the perk the
+wall gave (picked for the pilot; a popup under the bonus) and then the next level's banner.
 
 ### Revive offer
 "CONTINUE?" with a draining ring (`ReviveOfferRemaining / ReviveOfferSeconds`), WATCH AD (if

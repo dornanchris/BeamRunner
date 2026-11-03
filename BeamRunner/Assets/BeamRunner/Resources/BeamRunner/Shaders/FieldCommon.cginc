@@ -5,11 +5,13 @@
 // light and anti-aliased procedural lines.
 //
 // Conventions
-//  * Flight axis = world +Z. The craft sits at z = 0 inside the 18 m × 18 m play field (x, y in −9 … +9); the
+//  * Flight axis = world +Z. The craft sits at z = 0 inside the 9 m × 9 m rail grid (x, y in −4.5 … +4.5); the
 //    world streams toward it. The camera chases from a few metres behind.
-//  * There is no curved-world bend: what you see is where the collision is (gates are aimed at from far away).
-//  * Fog is radial: it grows with the distance from the camera, so the floor fades out evenly in every direction
-//    and meets the sky's horizon band.
+//  * The track bends up each level's wall (TrackSpace.cs): the C# side places everything; shaders see plain world
+//    positions. While the craft rides a bend the world turns about the bend's axis, and the sky turns with it
+//    (_FieldSkyRotation), so "up" in world space means nothing to the shaders: no horizon, no floor-vs-sky split.
+//  * Fog is radial: it grows with the distance from the camera, and everything fades toward FieldSkyColor of its
+//    view direction (the haze at the far end of the track, the void elsewhere), so nothing leaves a silhouette.
 //  * Global colours arrive already in the active colour space (FieldGlobals converts them); they are LDR
 //    (0..1) and shaders scale them into HDR themselves so bloom can catch the lines.
 //  * Positions / UVs are always float (large track coordinates); colours may be half.
@@ -36,6 +38,12 @@ float _FieldBeat;         // 0..1 music beat pulse (every beat)
 float _FieldBeatRing;     // 0..1 beat pulse on ring beats only (every FieldGlobals.BeatRingEvery beats)
 float _FieldSpeed01;      // normalised speed (can exceed 1 in Overdrive)
 float _FieldFlash;        // 0..1 world flash
+float4x4 _FieldSkyRotation; // world → sky directions (the turns of the walls climbed so far)
+float4 _FieldNextColorA;  // the next level's palette (the wall ahead wears it)
+float4 _FieldNextColorB;
+float4 _FieldNextColorC;
+float4 _FieldNextBaseColor;
+float4 _FieldSurfacePattern; // x = pattern of the face under the track, y = of the wall ahead (Surface shader)
 
 // ---------------------------------------------------------------------------------------------------
 // Transforms
@@ -95,52 +103,40 @@ half3 FieldFogFade(half3 color, float fog)
     return color * (half)(1.0 - fog);
 }
 
-// Extra light where the floor meets the fog: the horizon glows instead of simply disappearing. The sky adds the
-// same term at its horizon (FieldSkyColor), so floor and sky join without a seam.
+// Extra light in the fog: what is fully fogged glows a little instead of simply disappearing (FieldSkyColor adds the
+// same term, so a fogged surface and the sky behind it match).
 half3 FieldEndGlow(float fog)
 {
     half3 glow = lerp((half3)_FieldFogColor.rgb, (half3)_FieldColorA.rgb, (half)0.45);
     return glow * (half)(_FieldFogParams.z * fog * fog * fog);
 }
 
-// The sky at view-direction elevation h (the normalised view direction's y), without stars and sun: the horizon colour
-// (fog colour + full horizon glow, exactly what the fully fogged floor shows) falling off to a deep zenith, plus a thin
-// glowing band and a wider haze. Band and haze start exactly at the horizon (h = 0): below it the sky equals the fogged
-// floor, so the floor's far edge never shows, whatever the camera height.
-half3 FieldSkyColor(float h)
+// The sky without stars and nebula, for a world view direction d (normalised): the haze the fog fades into fills the
+// far end of the track (+Z, where every rail converges) and deepens toward the void at the sides and behind, with a
+// soft glow at the very end of the track. It depends only on the view direction relative to the ride axis, so it stays
+// put while the world turns on a bend (the rotating part of the sky is drawn on top by the Sky shader).
+half3 FieldSkyColor(float3 d)
 {
     half3 fogCol = (half3)_FieldFogColor.rgb;
     half3 colA = (half3)_FieldColorA.rgb;
-    half3 colC = (half3)_FieldColorC.rgb;
-    half3 horizon = fogCol + FieldEndGlow(1.0);
-    half3 zenith = (half3)_FieldBaseColor.rgb * (half)0.7 + (half3)_FieldColorB.rgb * (half)0.025;
-    float t = saturate(h * 2.2);
-    t = 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t);
-    half3 col = lerp(horizon, zenith, (half)t);
-
-    float above = smoothstep(-0.002, 0.002, h);
-    float band = exp2(-abs(h) * 40.0) * above;
-    float haze = exp2(-max(h, 0.0) * 7.0) * above;
-    float strength = _FieldFogParams.w;
-    col += lerp(colA, colC, (half)0.3) * (half)(band * 0.35 * strength);
-    col += lerp(fogCol, colA, (half)0.5) * (half)(haze * 0.12 * strength);
+    half3 haze = fogCol + FieldEndGlow(1.0) * (half)0.18;
+    half3 deep = (half3)_FieldBaseColor.rgb * (half)0.7 + (half3)_FieldColorB.rgb * (half)0.025;
+    float f = saturate(d.z);
+    float k = saturate((1.0 - f) * 7.0); // the haze fills ~25° around the end of the track
+    k = k * k * (3.0 - 2.0 * k);
+    half3 col = lerp(haze, deep, (half)k);
+    float core = exp2(-(1.0 - f) * 18.0);
+    col += lerp(fogCol, colA, (half)0.5) * (half)(core * 0.1 * _FieldFogParams.w);
     return col;
 }
 
-// Fog for opaque things floating in the field (walls, cubes, pickups, the craft): they fade toward what is behind them,
-// so a far obstacle melts into the floor or the sky instead of standing out as a dark silhouette. h = elevation of the
-// view direction (see FieldSkyColor). Below the horizon this is exactly FieldFogFloor (fog colour + glow · fog³);
-// above it the target bends toward the sky colour, reaching it at full fog.
-half3 FieldFogOpaque(half3 color, float fog, float h)
+// Fog for opaque things (cubes, pickups, the craft, the surface): they fade toward the sky behind them (FieldSkyColor
+// of the view direction dir, from the camera to the fragment), reaching it exactly at full fog, so a far obstacle
+// melts into its background instead of standing out as a dark silhouette.
+half3 FieldFogOpaque(half3 color, float fog, float3 dir)
 {
-    half3 target = lerp((half3)_FieldFogColor.rgb, FieldSkyColor(h), (half)(fog * fog));
+    half3 target = lerp((half3)_FieldFogColor.rgb, FieldSkyColor(dir), (half)(fog * fog));
     return lerp(color, target, (half)fog);
-}
-
-// The floor's fog: FieldFogOpaque for h < 0, written out (the floor is always below the camera, below the horizon).
-half3 FieldFogFloor(half3 color, float fog)
-{
-    return FieldFogBlend(color, fog) + FieldEndGlow(fog);
 }
 
 // Interleaved gradient noise in [0, 1) from a pixel position: the threshold pattern of dithered fades.

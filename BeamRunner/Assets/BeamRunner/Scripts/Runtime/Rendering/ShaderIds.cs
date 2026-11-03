@@ -18,6 +18,12 @@ namespace BeamRunner.Rendering
         public static readonly int FieldBeat = Shader.PropertyToID("_FieldBeat");
         public static readonly int FieldBeatRing = Shader.PropertyToID("_FieldBeatRing");
         public static readonly int FieldSpeed01 = Shader.PropertyToID("_FieldSpeed01");
+        public static readonly int FieldSkyRotation = Shader.PropertyToID("_FieldSkyRotation");
+        public static readonly int FieldNextColorA = Shader.PropertyToID("_FieldNextColorA");
+        public static readonly int FieldNextColorB = Shader.PropertyToID("_FieldNextColorB");
+        public static readonly int FieldNextColorC = Shader.PropertyToID("_FieldNextColorC");
+        public static readonly int FieldNextBaseColor = Shader.PropertyToID("_FieldNextBaseColor");
+        public static readonly int FieldSurfacePattern = Shader.PropertyToID("_FieldSurfacePattern");
         public static readonly int FieldFlash = Shader.PropertyToID("_FieldFlash");
 
         // Per-material / per-instance
@@ -50,25 +56,15 @@ namespace BeamRunner.Rendering
         public static readonly int EmissionMap = Shader.PropertyToID("_EmissionMap");
         public static readonly int EmissionColor = Shader.PropertyToID("_EmissionColor");
         public static readonly int Ambient = Shader.PropertyToID("_Ambient");
-        public static readonly int GridIntensity = Shader.PropertyToID("_GridIntensity");
-        public static readonly int StreakIntensity = Shader.PropertyToID("_StreakIntensity");
 
-        // Grid (floor / ceiling)
-        public static readonly int RailIntensity = Shader.PropertyToID("_RailIntensity");
-        public static readonly int PulseIntensity = Shader.PropertyToID("_PulseIntensity");
-        public static readonly int BaseAmount = Shader.PropertyToID("_BaseAmount");
-        public static readonly int CellSize = Shader.PropertyToID("_CellSize");
-        public static readonly int HalfExtent = Shader.PropertyToID("_HalfExtent");
-        public static readonly int SrcBlend = Shader.PropertyToID("_SrcBlend");
-        public static readonly int DstBlend = Shader.PropertyToID("_DstBlend");
-        public static readonly int ZWrite = Shader.PropertyToID("_ZWrite");
+        // Surface
+        public static readonly int HalfWidth = Shader.PropertyToID("_HalfWidth");
+        public static readonly int SideHeight = Shader.PropertyToID("_SideHeight");
 
         // Sky
         public static readonly int Radius = Shader.PropertyToID("_Radius");
         public static readonly int StarDensity = Shader.PropertyToID("_StarDensity");
         public static readonly int StarIntensity = Shader.PropertyToID("_StarIntensity");
-        public static readonly int SunIntensity = Shader.PropertyToID("_SunIntensity");
-        public static readonly int SunSize = Shader.PropertyToID("_SunSize");
 
         /// <summary>Palette weights selecting the level primary colour (_FieldColorA).</summary>
         public static readonly Vector4 PalettePrimary = new Vector4(1f, 0f, 0f, 0f);

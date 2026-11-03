@@ -23,9 +23,15 @@ namespace BeamRunner.Core.Field
 
         /// <summary>The wall that ends a level (every cell of its row): the craft is carried up and over it.</summary>
         Wall,
+
+        /// <summary>A diagonal rail into the lane on the left over the tile (a swipe left builds it; the craft ends the tile one lane left).</summary>
+        SwitchLeft,
+
+        /// <summary>A diagonal rail into the lane on the right over the tile.</summary>
+        SwitchRight,
     }
 
-    /// <summary>What the player can build on the next tile (all cost fuel).</summary>
+    /// <summary>What the player can build on the next tile (bridges and ramps cost fuel; switches are free).</summary>
     public enum BuildKind
     {
         None = 0,
@@ -38,6 +44,12 @@ namespace BeamRunner.Core.Field
 
         /// <summary>Swipe down: a ramp down one layer on the next tile.</summary>
         RampDown,
+
+        /// <summary>Swipe left: a diagonal rail on the next tile into the lane on the left (free).</summary>
+        SwitchLeft,
+
+        /// <summary>Swipe right: a diagonal rail on the next tile into the lane on the right (free).</summary>
+        SwitchRight,
     }
 
     /// <summary>Static helpers for <see cref="CellType"/>.</summary>
@@ -53,6 +65,30 @@ namespace BeamRunner.Core.Field
         public static bool IsRamp(CellType c)
         {
             return c == CellType.RampUp || c == CellType.RampDown;
+        }
+
+        /// <summary>True for a diagonal rail into the next lane.</summary>
+        public static bool IsSwitch(CellType c)
+        {
+            return c == CellType.SwitchLeft || c == CellType.SwitchRight;
+        }
+
+        /// <summary>Lanes a cell moves the craft over its tile: +1 (right), −1 (left) or 0.</summary>
+        public static int LaneDelta(CellType c)
+        {
+            return c == CellType.SwitchRight ? 1 : c == CellType.SwitchLeft ? -1 : 0;
+        }
+
+        /// <summary>The switch build toward <paramref name="direction"/> (−1 left, +1 right).</summary>
+        public static BuildKind SwitchToward(int direction)
+        {
+            return direction < 0 ? BuildKind.SwitchLeft : BuildKind.SwitchRight;
+        }
+
+        /// <summary>True for the free lane-switch builds.</summary>
+        public static bool IsSwitch(BuildKind kind)
+        {
+            return kind == BuildKind.SwitchLeft || kind == BuildKind.SwitchRight;
         }
 
         /// <summary>Layers a cell moves the craft over its tile: +1, −1 or 0.</summary>
@@ -72,6 +108,10 @@ namespace BeamRunner.Core.Field
                     return CellType.RampDown;
                 case BuildKind.Bridge:
                     return CellType.Track;
+                case BuildKind.SwitchLeft:
+                    return CellType.SwitchLeft;
+                case BuildKind.SwitchRight:
+                    return CellType.SwitchRight;
                 default:
                     return CellType.Empty;
             }
@@ -109,6 +149,13 @@ namespace BeamRunner.Core.Field
             }
 
             return Cells[FieldSpec.CellIndex(lane, layer)];
+        }
+
+        /// <summary>True if the cell can be ridden: rail, a ramp or the wall (not a gap, not an obstacle; out of range = false).</summary>
+        public bool IsSolidAt(int lane, int layer)
+        {
+            CellType c = Get(lane, layer);
+            return c != CellType.Empty && c != CellType.Obstacle;
         }
 
         public void Set(int lane, int layer, CellType type)

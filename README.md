@@ -5,16 +5,17 @@ and Android (with desktop, keyboard and gamepad support). Your ship rides rails 
 layers — and moves forward on its own. **Swipe left or right** to change lane, **tap** to build a bridge across the gap
 ahead, **swipe up or down** to build a ramp to another layer. Every build costs **fuel**, picked up along the way —
 often on the riskier routes. Miss a build and you drop a layer (and a hull point); fall two layers, off the bottom into
-the void, or ramp into the ceiling and the run is over. Each level ends at a **wall** that carries you up to a
-checkpoint with a perk pick. Gems buy **ship upgrades** (fuel tank, build efficiency, starting fuel, power-up time,
+the void, or ramp into the ceiling and the run is over. Each level ends at a **wall**: the track turns up it and you
+ride straight on up into the next level, collecting a perk on the way. Gems buy **ship upgrades** (fuel tank, build efficiency, starting fuel, power-up time,
 hull) between runs; power-ups — shield, magnet, Overload, instant build, repair — bend the rules for a few seconds, and a
 hidden adaptive difficulty keeps each run challenging but fair. Almost everything — meshes, textures, materials,
 particles, music, sound effects and UI — is generated procedurally at runtime. Design brief:
 `Builder Runner – Design Doc.docx`.
 
 It is a fork of **LightLancer** (itself forked from CubeField 3D and Neo Slipstream): the infrastructure — UI kit,
-services (ads, IAP, online, saves), procedural audio, localization, ships and skins, tooling and CI — and the synthwave
-world are shared; the track, building, fuel, falls, checkpoint, upgrades and adaptive difficulty are new (see
+services (ads, IAP, online, saves), procedural audio, localization, ships and skins, tooling and CI — are shared; the
+world (a beam in deep space that turns up each wall), the track, building, fuel, falls, the walls, upgrades and adaptive
+difficulty are new (see
 `docs/ARCHITECTURE.md` §§4–5 and §8).
 
 > Parts of the feature list below are inherited from the earlier games and still describe their rules in places; the
@@ -30,12 +31,15 @@ world are shared; the track, building, fuel, falls, checkpoint, upgrades and ada
 - **Three layers, hard edges** — the ceiling above the top layer and the void below the bottom one kill; a one-layer
   fall costs a hull point (a shield absorbs it).
 - **Levels that teach** — 1 first bridges · 2 ramps and gem trails · 3 the edges · 4 the fuel line · from 5 obstacles
-  that force new routes; from level 13 the mixed kinds repeat at full speed. Every level ends at a wall checkpoint:
-  stats, a perk pick (refuel, patch, shield, lean builds, big tank, long boosts), or watch an ad to take all three.
-- **Affordable by construction** — hand-made chunks are placed only when a route through them survives on the fuel a
-  pilot can have there (a dynamic-programming route solver), and fuel chunks step in when the tank runs low.
-- **Gem trails that lead you into building** — trails cross gaps and dip between layers; the richest run on the top
-  layer under the ceiling.
+  that force new routes; from level 13 the mixed kinds repeat at full speed. Every level ends at a wall: the track
+  bends up it and the next level climbs it without a stop, and the wall hands you the perk you need most (patch,
+  refuel, shield, big tank, lean builds, long boosts).
+- **A route, branches and a guide** — one guaranteed route that shifts lanes, breaks into gaps, goes on a layer up or
+  down where you must build the ramp and puts cubes in the way, with branch rails beside it; a swipe builds a diagonal
+  piece into the next lane, so you build your way between beams instead of jumping. Every beat is placed only when the route survives it on the fuel a pilot can have there (a
+  dynamic-programming route solver), and fuel steps in when the tank runs low.
+- **Gems that lead you into building** — forks put gems or fuel past a gap on a side rail, and the richest runs are on the
+  top layer under the ceiling; pickups only ever sit on rails.
 - **Power-ups** — shield, magnet (pulls gems and fuel), Overload (speed, smashes obstacles, flies over gaps), instant
   build (free building), repair (full hull).
 - **Hidden adaptive difficulty** (−2 … +2): speed, gaps, fuel, obstacles, drops, the gap warning's lead time and gem
@@ -52,8 +56,9 @@ world are shared; the track, building, fuel, falls, checkpoint, upgrades and ada
   across devices (Saved Games / iCloud) — off until the ids are set in `online.json`.
 
 **Presentation**
-- Pipeline-agnostic neon shaders: rails of light that snap into place as you build, a starry synthwave sky, neon-edged cubes
-  and level walls, a grid floor far below the void, fog and a glowing horizon; URP bloom, vignette and chromatic aberration.
+- Pipeline-agnostic neon shaders: rails of light that snap into place as you build over a dark glowing beam far below,
+  the next level's beam rising ahead as a tower of light in its own colours, deep space with a nebula and a beacon star
+  that swing round as you climb each wall, neon-edged cubes and fog; URP bloom, vignette and chromatic aberration.
 - A procedural synthwave soundtrack rendered at boot: the Run theme adds layers as speed and multiplier rise, with a
   lead hook in Overload; every sound effect is synthesized too.
 - Juicy feedback: camera shake and FOV kicks, particle bursts, haptics, pitch-climbing gem chains, a palette per
@@ -116,7 +121,7 @@ Batch-mode entry points for CI:
 
 | | Change lane | Bridge (next tile) | Ramp up / down (next tile) | Pause |
 |---|---|---|---|---|
-| Touch — **Swipe** (default) | Swipe left / right (keep sliding for a second lane) | Tap anywhere | Swipe up / down | Pause button, Android back |
+| Touch — **Swipe** (default) | Swipe left / right: a diagonal piece into the next lane on the next tile | Tap anywhere | Swipe up / down | Pause button, Android back |
 | Touch — **Tap sides** | Tap the outer third of the screen | Tap the middle | Swipe up / down | Pause button |
 | Keyboard | A / D or ← / → | Space or Enter | W / S or ↑ / ↓ | Esc or P |
 | Mouse | Click-drag left / right | Click (right click also bridges) | Click-drag up / down | — |

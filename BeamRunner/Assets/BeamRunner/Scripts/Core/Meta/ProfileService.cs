@@ -67,6 +67,9 @@ namespace BeamRunner.Core.Meta
     public sealed partial class ProfileService
     {
         public const int LeaderboardSize = 10;
+
+        /// <summary>A first run this long (most of level 1, short of its wall) ends the tutorial.</summary>
+        public const float TutorialCompleteMetres = 200f;
         public const int ReviveGemCost = 250;
         public const float ScoreBonusPerRank = 0.04f;
         public const int RankUpBaseReward = 250;
@@ -365,7 +368,7 @@ namespace BeamRunner.Core.Meta
             }
 
             // A completed first run (any length past the warm-up) ends the tutorial.
-            if (r.Distance > 300f || s.Runs >= 2)
+            if (r.Distance > TutorialCompleteMetres || s.Runs >= 2)
             {
                 Profile.Flags.TutorialDone = true;
             }

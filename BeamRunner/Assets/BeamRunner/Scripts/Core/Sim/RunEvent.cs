@@ -81,13 +81,10 @@ namespace BeamRunner.Core.Sim
         /// <summary>The hull was restored. Count = hull now.</summary>
         Repaired,
 
-        /// <summary>The craft reached the wall that ends the level and starts climbing it. Count = level.</summary>
+        /// <summary>The craft reached the wall that ends the level and turns up it. Count = level.</summary>
         WallReached,
 
-        /// <summary>At the top of the wall: the checkpoint (stats, perk pick). Count = level just cleared.</summary>
-        CheckpointReached,
-
-        /// <summary>A checkpoint perk was applied. Count = (int)CheckpointPerk.</summary>
+        /// <summary>The wall's perk was applied (after LevelCleared, before the next LevelStarted). Count = (int)CheckpointPerk.</summary>
         PerkApplied,
 
         /// <summary>The craft changed layer by riding a ramp. Count = new layer, Value = direction.</summary>

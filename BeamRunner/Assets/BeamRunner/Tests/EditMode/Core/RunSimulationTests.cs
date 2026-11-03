@@ -150,48 +150,73 @@ namespace BeamRunner.Core.Tests
         // ------------------------------------------------------------------ lanes
 
         [Test]
-        public void Swipes_MoveOneLaneAtATime_AndStayInTheField()
+        public void ASwipe_BuildsADiagonalOnTheNextTile_ThatTheCraftRidesIntoTheNextLane()
         {
             RunSimulation sim = NewSim();
             Assert.AreEqual(FieldSpec.CenterLane, sim.Lane);
             Assert.AreEqual(Middle, sim.Layer, "every level starts on the middle layer");
-            sim.Step(Frame, new RunInput { LaneShift = -1 });
-            for (int i = 0; i < 30; i++)
-            {
-                sim.Step(Frame, new RunInput());
-            }
+            float fuel = sim.Fuel;
+            var log = new List<RunEvent>();
+            Step(sim, new RunInput { LaneShift = -1 }, log);
+            Assert.AreEqual(CellType.SwitchLeft, sim.Grid.Get(1, Lane, Middle), "a diagonal on the next tile, like a bridge");
+            Assert.IsTrue(sim.Grid.Row(1).IsBuilt(Lane, Middle));
+            Assert.AreEqual(1, Count(log, RunEventType.LaneChanged));
+            Assert.AreEqual(fuel, sim.Fuel, 1e-4f, "free along rail");
 
+            Assert.IsTrue(Ride(sim, s => s.Tile == 1 && s.Distance < FieldSpec.TileStart(1) + 0.5));
+            Assert.AreEqual(FieldSpec.LaneX(Lane), sim.ShipX, 0.05f, "still in its lane until the diagonal begins");
+            Assert.IsTrue(Ride(sim, s => s.Distance > FieldSpec.TileStart(1) + FieldSpec.TileLength * 0.5));
+            Assert.That(sim.ShipX, Is.InRange(FieldSpec.LaneX(0) + 0.3f, FieldSpec.LaneX(Lane) - 0.3f), "halfway across over the tile");
+            Assert.IsTrue(Ride(sim, s => s.Tile == 2));
             Assert.AreEqual(0, sim.Lane);
-            Assert.AreEqual(FieldSpec.LaneX(0), sim.ShipX, 1e-4f, "settles on the lane's centre");
-
-            sim.Step(Frame, new RunInput { LaneShift = -1 });
-            Assert.AreEqual(0, sim.TargetLane, "no lane left of the left lane");
-
-            sim.Step(Frame, new RunInput { LaneShift = 2 });
-            float t = 0f;
-            while (sim.ShipX < FieldSpec.LaneX(2) - 0.01f && t < 1f)
-            {
-                sim.Step(Frame, new RunInput());
-                t += Frame;
-            }
-
-            Assert.That(t, Is.LessThan(0.45f), "two lanes in well under half a second");
-            Assert.AreEqual(Middle, sim.Layer);
+            Assert.AreEqual(FieldSpec.LaneX(0), sim.ShipX, 1e-4f, "exactly in the new lane at the end of the tile");
             Assert.IsFalse(sim.IsFalling);
+
+            Step(sim, new RunInput { LaneShift = -1 });
+            Assert.AreEqual(CellType.Track, sim.Grid.Get(3, 0, Middle), "no lane left of the left lane");
+
+            Step(sim, new RunInput { LaneShift = 1 });
+            Step(sim, new RunInput { LaneShift = 1 });
+            Assert.AreEqual(CellType.SwitchRight, sim.Grid.Get(3, 0, Middle), "one diagonal a tile");
+            Assert.AreEqual(CellType.Track, sim.Grid.Get(4, 1, Middle));
+            Assert.IsTrue(Ride(sim, s => s.Tile == 4));
+            Assert.AreEqual(1, sim.Lane);
+            Assert.AreEqual(Middle, sim.Layer);
         }
 
         [Test]
-        public void LaneSwitch_WaitsWhileOnARamp()
+        public void ADiagonalOverAGap_CostsWhatABridgeCosts()
+        {
+            RunSimulation sim = NewSim();
+            sim.Grid.Set(1, Lane, Middle, CellType.Empty);
+            sim.DebugSetFuel(10f);
+            Step(sim, new RunInput { LaneShift = 1 });
+            Assert.AreEqual(CellType.SwitchRight, sim.Grid.Get(1, Lane, Middle));
+            Assert.AreEqual(10f - sim.BuildCost(BuildKind.Bridge), sim.Fuel, 1e-4f);
+            Assert.IsTrue(Ride(sim, s => s.Tile == 2));
+            Assert.IsFalse(sim.IsFalling);
+            Assert.AreEqual(Lane + 1, sim.Lane);
+
+            // Without the fuel, nothing is built (and the tap's "empty" feedback plays).
+            sim.Grid.Set(3, Lane + 1, Middle, CellType.Empty);
+            sim.DebugSetFuel(0f);
+            var log = new List<RunEvent>();
+            Step(sim, new RunInput { LaneShift = -1 }, log);
+            Assert.AreEqual(CellType.Empty, sim.Grid.Get(3, Lane + 1, Middle));
+            Assert.AreEqual(1, Count(log, RunEventType.BuildFailed));
+        }
+
+        [Test]
+        public void ADiagonalOnTheTileAfterARamp_RunsOnTheLayerTheRampReaches()
         {
             RunSimulation sim = NewSim(2);
             Step(sim, new RunInput { Build = BuildKind.RampUp });
             Assert.IsTrue(Ride(sim, s => s.Tile == 1 && s.Distance > FieldSpec.TileStart(1) + 2.0));
             Step(sim, new RunInput { LaneShift = -1 });
-            Assert.AreEqual(Lane, sim.TargetLane, "no lane switch halfway up a ramp");
-            Assert.IsTrue(Ride(sim, s => s.Tile == 2));
-            Ride(sim, s => s.TargetLane != Lane, maxFrames: 5);
-            Assert.AreEqual(Lane - 1, sim.TargetLane, "the queued switch happens on the next tile");
-            Assert.AreEqual(Middle + 1, sim.Layer, "after climbing the ramp");
+            Assert.AreEqual(CellType.SwitchLeft, sim.Grid.Get(2, Lane, Middle + 1), "built where the ramp leads");
+            Assert.IsTrue(Ride(sim, s => s.Tile == 3));
+            Assert.AreEqual(Lane - 1, sim.Lane);
+            Assert.AreEqual(Middle + 1, sim.Layer);
         }
 
         // ------------------------------------------------------------------ building
@@ -635,80 +660,107 @@ namespace BeamRunner.Core.Tests
             Assert.AreEqual(1f, sim.Fuel, 1e-4f, "a cell in another lane is missed");
         }
 
-        // ------------------------------------------------------------------ the wall checkpoint
+        // ------------------------------------------------------------------ the wall
 
         [Test]
-        public void TheWall_PausesAtTheCheckpoint_AndContinueStartsTheNextLevelOnTheMiddleLayer()
+        public void TheWall_IsRiddenUpWithoutStopping_IntoTheNextLevelOnTheMiddleLayer()
         {
             RunSimulation sim = NewSim();
             long wall = sim.Course.WallTile(1);
             var log = new List<RunEvent>();
             Assert.IsTrue(Ride(sim, s => s.Phase == RunPhase.Climbing, log, maxFrames: 60 * 60, pave: true), "rides to the wall");
             Assert.AreEqual(wall, sim.Tile);
+            Assert.IsTrue(sim.IsClimbing);
             Assert.AreEqual(1, Find(log, RunEventType.WallReached).Count);
-            Assert.IsTrue(Ride(sim, s => s.AtCheckpoint, log, maxFrames: 120));
-            Assert.AreEqual(RunPhase.Checkpoint, sim.Phase);
-            Assert.AreEqual(1, Find(log, RunEventType.CheckpointReached).Count);
-            Assert.AreEqual(1, Find(log, RunEventType.LevelCleared).Count);
-            Assert.AreEqual(1, sim.Level);
-            Assert.AreEqual(1, sim.BuildResult().LevelsCleared);
-            long score = sim.Score;
-            Assert.That(score, Is.GreaterThan(0));
-
-            // The run waits for the pilot.
-            double distance = sim.Distance;
-            double time = sim.Time;
             long tile;
             int lane;
             int layer;
-            Assert.IsFalse(sim.BuildTarget(out tile, out lane, out layer), "no building at a checkpoint");
-            for (int i = 0; i < 60 * 5; i++)
-            {
-                Step(sim, new RunInput { LaneShift = 1, Build = BuildKind.Bridge });
-            }
+            Assert.IsFalse(sim.BuildTarget(out tile, out lane, out layer), "no building on the bend");
 
-            Assert.IsTrue(sim.AtCheckpoint);
-            Assert.AreEqual(distance, sim.Distance);
-            Assert.AreEqual(time, sim.Time, "paused time is not run time");
-            Assert.AreEqual(0, sim.BuildResult().Builds);
-
-            sim.DebugSetFuel(1f);
-            Assert.IsTrue(sim.GrantPerk(CheckpointPerk.Shield));
-            Assert.IsTrue(sim.ShieldActive);
-            Assert.IsTrue(sim.ContinueFromCheckpoint(CheckpointPerk.Refuel));
-            Assert.AreEqual(sim.MaxFuel, sim.Fuel, "the refuel perk");
-            Assert.IsFalse(sim.ContinueFromCheckpoint(CheckpointPerk.Refuel), "only once");
-            Assert.IsFalse(sim.GrantPerk(CheckpointPerk.Patch), "perks only at the checkpoint");
-            Assert.AreEqual(RunPhase.Descending, sim.Phase);
-            Assert.AreEqual(2, sim.Level);
+            // The bend takes ClimbSeconds of run time, with the craft moving all the way (no stop for a checkpoint).
+            int frames = -1; // Ride checks before every step, the first time before any
+            double last = sim.Distance;
             log.Clear();
-            Assert.IsTrue(Ride(sim, s => s.Phase == RunPhase.Riding, log, maxFrames: 120));
-            Assert.AreEqual(sim.Course.LevelStartTile(2), sim.Tile, "lands on the first tile of level 2");
+            Assert.IsTrue(Ride(sim, s =>
+            {
+                if (++frames > 0)
+                {
+                    Assert.That(s.Distance, Is.GreaterThan(last), "keeps moving");
+                }
+
+                last = s.Distance;
+                return s.Phase == RunPhase.Riding;
+            }, log, maxFrames: 120));
+            float seconds = frames * Frame;
+            Assert.That(seconds, Is.InRange(RunSimulation.ClimbSeconds - 2 * Frame, RunSimulation.ClimbSeconds + 2 * Frame));
+
+            // Over the top: cleared, the perk applied, the next level started — in that order.
+            Assert.AreEqual(1, Count(log, RunEventType.LevelCleared));
+            Assert.AreEqual(1, Count(log, RunEventType.PerkApplied));
+            Assert.AreEqual(1, Count(log, RunEventType.LevelStarted));
+            int cleared = log.FindIndex(e => e.Type == RunEventType.LevelCleared);
+            int perk = log.FindIndex(e => e.Type == RunEventType.PerkApplied);
+            int started = log.FindIndex(e => e.Type == RunEventType.LevelStarted);
+            Assert.That(cleared, Is.LessThan(perk));
+            Assert.That(perk, Is.LessThan(started));
+            Assert.AreEqual(2, Find(log, RunEventType.LevelStarted).Count);
+            Assert.AreEqual(1, sim.BuildResult().LevelsCleared);
+            Assert.That(sim.Score, Is.GreaterThan(0));
+
+            Assert.AreEqual(2, sim.Level);
+            Assert.AreEqual(sim.Course.LevelStartTile(2), sim.Tile, "rides onto the first tile of level 2");
             Assert.AreEqual(Middle, sim.Layer);
             Assert.AreEqual(FieldSpec.RideY(Middle), sim.ShipY, 1e-4f);
             Assert.AreEqual(CellType.Track, sim.Grid.Get(sim.Tile, sim.Lane, Middle));
+            Assert.That(sim.Speed, Is.GreaterThan(Levels.StartSpeed * 0.9f), "at full speed straight away");
             Assert.IsTrue(Ride(sim, s => s.Tile == sim.Course.LevelStartTile(2) + 3, log));
             Assert.IsFalse(sim.IsFalling);
             Assert.AreEqual(2, sim.BuildResult().LevelReached);
         }
 
         [Test]
-        public void AutoCheckpoint_ContinuesByItself()
+        public void TheWallsPerk_IsPickedForThePilot()
         {
-            RunSimulation sim = NewSim(1, c => c.AutoCheckpoint = true);
-            var log = new List<RunEvent>();
-            int paused = 0;
-            Assert.IsTrue(Ride(sim, s =>
+            // Damaged: a hull point back.
+            Assert.AreEqual(CheckpointPerk.Patch, PerkAtFirstWall(s => s.DebugSetHull(s.MaxHull - 1)));
+
+            // Under half a tank: refuelled.
+            RunSimulation low = null;
+            Assert.AreEqual(CheckpointPerk.Refuel, PerkAtFirstWall(s =>
             {
-                paused += s.AtCheckpoint ? 1 : 0;
-                return s.Level == 2 && s.Phase == RunPhase.Riding;
-            }, log, maxFrames: 60 * 60, pave: true));
-            Assert.AreEqual(1, Count(log, RunEventType.CheckpointReached));
-            Assert.AreEqual(2, Count(log, RunEventType.LevelStarted), "level 1 started, then level 2");
-            float wait = RunSimulation.AutoCheckpointSeconds;
-            Assert.That(paused * Frame, Is.InRange(wait - 2 * Frame, wait + 2 * Frame), "a short pause at the checkpoint");
-            Assert.AreEqual(Middle, sim.Layer);
-            Assert.AreEqual(1, sim.BuildResult().LevelsCleared);
+                s.DebugSetFuel(s.MaxFuel * 0.3f);
+                low = s;
+            }));
+            Assert.AreEqual(low.MaxFuel, low.Fuel, 1e-4f);
+
+            // Nothing urgent: the rotation, which starts with a shield…
+            RunSimulation fine = null;
+            Assert.AreEqual(CheckpointPerk.Shield, PerkAtFirstWall(s =>
+            {
+                s.DebugSetFuel(s.MaxFuel);
+                fine = s;
+            }));
+            Assert.IsTrue(fine.ShieldActive);
+
+            // …unless one is already up.
+            Assert.AreEqual(CheckpointPerk.BigTank, PerkAtFirstWall(s =>
+            {
+                s.DebugSetFuel(s.MaxFuel);
+                s.DebugGrantShield();
+            }));
+        }
+
+        /// <summary>Rides a paved level 1 to its wall, preparing the craft just before it, and returns the perk applied.</summary>
+        private static CheckpointPerk PerkAtFirstWall(Action<RunSimulation> beforeWall)
+        {
+            RunSimulation sim = NewSim();
+            long wall = sim.Course.WallTile(1);
+            Assert.IsTrue(Ride(sim, s => s.Tile >= wall - 1, null, maxFrames: 60 * 60, pave: true));
+            beforeWall(sim);
+            var log = new List<RunEvent>();
+            Assert.IsTrue(Ride(sim, s => s.Level == 2, log, maxFrames: 120));
+            Assert.AreEqual(1, Count(log, RunEventType.PerkApplied));
+            return (CheckpointPerk)Find(log, RunEventType.PerkApplied).Count;
         }
 
         // ------------------------------------------------------------------ revive
@@ -788,7 +840,7 @@ namespace BeamRunner.Core.Tests
         }
 
         /// <summary>
-        /// A minute of a level-3 run (invincible, automatic checkpoints) under a fixed script of swipes and taps that
+        /// A minute of a level-3 run (invincible) under a fixed script of swipes and taps that
         /// depends only on the frame number.
         /// </summary>
         private static RunSimulation Scripted(int seed)
@@ -797,7 +849,6 @@ namespace BeamRunner.Core.Tests
             {
                 c.Seed = seed;
                 c.Invincible = true;
-                c.AutoCheckpoint = true;
             });
             var script = new Rng(5);
             for (int i = 0; i < 60 * 60; i++)
@@ -890,7 +941,6 @@ namespace BeamRunner.Core.Tests
                 Seed = seed,
                 StartLevel = startLevel,
                 Modifiers = DifficultyModifiers.Standard,
-                AutoCheckpoint = true,
                 Balance = new BalanceConfig(),
             });
             for (int i = 0; i < seconds / frame && !sim.IsCrashed && !until(sim); i++)

@@ -29,7 +29,7 @@ namespace BeamRunner.Rendering
     /// (with lag), so the craft visibly moves on screen and stays in view at the field's edges, while the camera looks a
     /// little back toward the field's centre <see cref="RunLookAhead"/> m ahead, so the field ahead stays in view too.
     /// Roll follows sideways velocity, a small pitch follows vertical velocity; FOV kicks with speed and Overdrive.</para>
-    /// <para>Up is always +Y (gravity-free, but the floor is down).</para>
+    /// <para>Up is always +Y: on a wall's bend the world turns about the craft (<see cref="TrackSpace"/>), not the camera.</para>
     /// </remarks>
     public sealed class CameraRig : MonoBehaviour
     {
@@ -41,6 +41,15 @@ namespace BeamRunner.Rendering
 
         /// <summary>Distance ahead of the craft the chase camera looks at (m).</summary>
         public const float RunLookAhead = 26f;
+
+        /// <summary>Height of the chase camera above the craft (m): about halfway to the layer above's rails.</summary>
+        public const float RunHeight = 1.5f;
+
+        /// <summary>Distance of the chase camera behind the craft in portrait (m; a little more in landscape).</summary>
+        public const float RunBack = 7f;
+
+        /// <summary>How far below the craft's height the chase camera aims, <see cref="RunLookAhead"/> m ahead (m).</summary>
+        public const float RunLookDrop = 1.1f;
 
         private const float BlendTime = 0.9f;
 
@@ -116,7 +125,7 @@ namespace BeamRunner.Rendering
             _camera.clearFlags = CameraClearFlags.SolidColor;
             _camera.backgroundColor = FieldGlobals.FogColor;
             _camera.nearClipPlane = NearClip;
-            _camera.farClipPlane = 300f; // beyond SpaceView.SkyRadius plus the camera's offset from the origin
+            _camera.farClipPlane = 1000f; // beyond SpaceView.SkyRadius plus the camera's offset from the origin
             _camera.allowHDR = true;
             _camera.allowMSAA = false;
             _camera.fieldOfView = 70f;
@@ -283,14 +292,14 @@ namespace BeamRunner.Rendering
                 _focus = new Vector2(_focus.x + (ship.x * RunFollow - _focus.x) * kx, _focus.y + (ship.y - _focus.y) * ky);
             }
 
-            float back = Mathf.Lerp(6.6f, 7.2f, landscape);
-            float height = Mathf.Lerp(2.6f, 2.2f, landscape);
-
-            // Never above the ceiling: from the top layer the hazard line stays overhead.
-            float camY = Mathf.Min(_focus.y + height, FieldSpec.CeilingY - 0.35f);
+            // Low, between the craft's layer and the one above (RunHeight of the 3 m layer spacing): from level with the
+            // layer above its rails ran straight through the middle of the view; from here they stay overhead while
+            // the camera tips down a little more, so the layer below stays in view too.
+            float back = Mathf.Lerp(RunBack, RunBack + 0.6f, landscape);
+            float camY = Mathf.Min(_focus.y + RunHeight, FieldSpec.CeilingY - 0.35f);
             pos = new Vector3(_focus.x, camY, -back);
 
-            Vector3 target = new Vector3(_focus.x * RunLookFollow, _focus.y - 0.2f, RunLookAhead);
+            Vector3 target = new Vector3(_focus.x * RunLookFollow, _focus.y - RunLookDrop, RunLookAhead);
 
             float targetRoll = Mathf.Clamp(-velX / FieldSpec.MaxLateralSpeed, -1f, 1f) * MaxRoll;
             float targetPitch = Mathf.Clamp(-velY / FieldSpec.MaxLateralSpeed, -1f, 1f) * MaxPitch;

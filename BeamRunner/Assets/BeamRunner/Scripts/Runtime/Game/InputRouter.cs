@@ -13,9 +13,10 @@ namespace BeamRunner.Game
 {
     /// <summary>
     /// Turns touch, mouse, keyboard and gamepad into <see cref="RunInput"/>: the design's five inputs, all swipes or a
-    /// tap anywhere on screen. <see cref="ControlMode.Swipe"/> (default): swipe left / right moves a lane (keep sliding the
-    /// same finger for a second lane), swipe up builds a ramp up, swipe down a ramp down, and a tap — a touch that barely
-    /// moved — builds a bridge. Every finger is its own gesture, so a second thumb can tap while the first swipes.
+    /// tap anywhere on screen. <see cref="ControlMode.Swipe"/> (default): swipe left / right moves one lane, swipe up builds
+    /// a ramp up, swipe down a ramp down, and a tap — a touch that barely moved — builds a bridge. A swipe does exactly one
+    /// thing however far the finger slides (two lanes = two swipes), and every finger is its own gesture, so a second
+    /// thumb can tap while the first swipes.
     /// <see cref="ControlMode.TapSides"/> adds taps on the outer thirds of the screen as lane moves (the middle still
     /// bridges). Keyboard A/D ←/→ move, W/↑ and S/↓ build ramps, Space bridges; the gamepad's d-pad / stick flicks move
     /// and build ramps, the south button bridges. Touches that start on a button never steer or build.
@@ -23,7 +24,7 @@ namespace BeamRunner.Game
     public sealed class InputRouter
     {
         /// <summary>A swipe must travel this fraction of the screen width (scaled by 1 / sensitivity).</summary>
-        private const float SwipeFraction = 0.07f;
+        private const float SwipeFraction = 0.1f;
 
         /// <summary>A touch shorter than this (s) that barely moved is a tap.</summary>
         private const float TapSeconds = 0.3f;
@@ -39,11 +40,12 @@ namespace BeamRunner.Game
         private struct Gesture
         {
             public int Id;
-            public Vector2 Anchor;
             public Vector2 Start;
             public float StartTime;
             public bool Moved;
-            public bool Vertical;
+
+            /// <summary>The gesture already moved a lane or built a ramp: it does nothing more until the finger lifts.</summary>
+            public bool Spent;
         }
 
         private readonly List<RaycastResult> _uiHits = new List<RaycastResult>(16);
@@ -253,7 +255,6 @@ namespace BeamRunner.Game
             _gestures[_gestureCount++] = new Gesture
             {
                 Id = id,
-                Anchor = pos,
                 Start = pos,
                 StartTime = Time.unscaledTime,
             };
@@ -262,22 +263,26 @@ namespace BeamRunner.Game
         private void Track(int g, Vector2 pos, ref int shift)
         {
             Gesture s = _gestures[g];
-            Vector2 d = pos - s.Anchor;
+            if (s.Spent)
+            {
+                return; // one action per swipe: a long slide never moves a second lane
+            }
+
+            Vector2 d = pos - s.Start;
             float threshold = SwipeDistance;
+
             if (Mathf.Abs(d.x) >= threshold && Mathf.Abs(d.x) > Mathf.Abs(d.y) * 0.8f)
             {
                 shift += d.x > 0f ? 1 : -1;
-                s.Anchor = pos; // keep sliding for the next lane
+                s.Spent = true;
                 s.Moved = true;
             }
-            else if (!s.Vertical && Mathf.Abs(d.y) >= threshold && Mathf.Abs(d.y) > Mathf.Abs(d.x) * 1.2f)
+            else if (Mathf.Abs(d.y) >= threshold && Mathf.Abs(d.y) > Mathf.Abs(d.x) * 1.2f)
             {
-                // One ramp per swipe; the same finger can still slide sideways afterwards.
                 bool up = d.y > 0f != InvertY;
                 QueueBuild(up ? BuildKind.RampUp : BuildKind.RampDown);
-                s.Vertical = true;
+                s.Spent = true;
                 s.Moved = true;
-                s.Anchor = pos;
             }
             else if ((pos - s.Start).sqrMagnitude > threshold * threshold * 0.25f)
             {

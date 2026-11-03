@@ -198,8 +198,8 @@ namespace BeamRunner.Game
             float x;
             float y;
             ghost.PositionAt(distance, out x, out y);
-            float worldZ = FieldMath.WorldZ(distance, run.Distance);
-            _ghostView.Tick(x, y, worldZ, run.ShipX, run.ShipY, !ghost.IsFinished(run.Time), dt);
+            UnityEngine.Vector3 p = TrackSpace.ToWorld(x, y, distance); // up the wall too, while the player is still before it
+            _ghostView.Tick(p.x, p.y, p.z, run.ShipX, run.ShipY, !ghost.IsFinished(run.Time), dt);
         }
 
         private string GhostDesign()
